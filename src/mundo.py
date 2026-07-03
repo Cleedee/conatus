@@ -372,7 +372,19 @@ class Simulacao:
             "crafting": [],
             "resumo_geral": ""
         }
-        
+
+        # Reset contador LLM para este tick
+        self._llm_chamadas_tick = 0
+        # Só usa LLM a cada N ticks
+        self._llm_gate = getattr(self, '_llm_gate', 0)
+        self._usar_llm_agora = (
+            self.agente_llm
+            and self.agente_llm.verificar_pronto()
+            and self.estado.tick_atual >= self._llm_gate
+        )
+        if self._usar_llm_agora:
+            self._llm_gate = self.estado.tick_atual + 8  # próximo uso daqui 8 ticks
+
         # 1. AVANÇAR TEMPO E MUNDO
         self._tick_mundo()
         
@@ -612,9 +624,11 @@ class Simulacao:
         # Decidir ação
         encontro_escolhido = None
         decisao_info = {}
-        
-        # Usar LLM se disponível
-        if self.agente_llm and self.agente_llm.verificar_pronto():
+
+        # Usar LLM se disponível (limitado a 1 chamada de decisão por tick)
+        usar_llm = self._usar_llm_agora and getattr(self, '_llm_chamadas_tick', 0) < 1
+        if usar_llm:
+            self._llm_chamadas_tick = getattr(self, '_llm_chamadas_tick', 0) + 1
             contexto = {
                 "local": personagem.local_atual,
                 "hora": self.estado.hora,
@@ -1160,19 +1174,65 @@ class Simulacao:
                 if p.local_atual not in locais_com_personagens:
                     locais_com_personagens[p.local_atual] = []
                 locais_com_personagens[p.local_atual].append(p)
-        
+
+        llm_pronto = getattr(self, '_usar_llm_agora', False) and self.agente_llm.verificar_pronto()
+
         # Verificar encontros sociais
         for local_id, personagens in locais_com_personagens.items():
             if len(personagens) >= 2:
                 # Chance de encontro social
                 if random.random() < 0.3:  # 30% por tick
                     p1, p2 = random.sample(personagens, 2)
-                    self.motor_encontros.processar_encontro_social(p1, p2)
-                    
+                    r1, r2 = self.motor_encontros.processar_encontro_social(p1, p2)
+
+                    # DIÁLOGO VIA LLM (30% dos encontros sociais, 1 chamada)
+                    dialogo = None
+                    if llm_pronto and random.random() < 0.3 and getattr(self, '_llm_chamadas_tick', 0) < 1:
+                        self._llm_chamadas_tick = getattr(self, '_llm_chamadas_tick', 0) + 1
+                        try:
+                            ctx = f"{p1.nome} e {p2.nome} se encontram em {local_id}."
+                            resp1 = self.agente_llm.gerar_resposta_social(p1, p2, ctx)
+                            resp2 = self.agente_llm.gerar_resposta_social(p2, p1, ctx)
+                            dialogo = {
+                                f"{p1.nome}": resp1.get("fala", "..."),
+                                f"{p2.nome}": resp2.get("fala", "..."),
+                                f"tom_{p1.nome}": resp1.get("tom", "neutro"),
+                                f"tom_{p2.nome}": resp2.get("tom", "neutro"),
+                            }
+                            self.estado.registrar_evento(
+                                f"💬 {p1.nome} e {p2.nome} conversaram",
+                                {"dialogo": dialogo, "local": local_id}
+                            )
+                        except Exception:
+                            pass  # LLM falhou, segue sem diálogo
+
+                    # OBSERVAÇÃO VIA LLM
+                    if llm_pronto and random.random() < 0.3 and getattr(self, '_llm_chamadas_tick', 0) < 1:
+                        observadores = [
+                            o for o in personagens
+                            if o.id not in (p1.id, p2.id)
+                        ]
+                        if observadores and random.random() < 0.5:
+                            try:
+                                obs = random.choice(observadores)
+                                cena = f"{p1.nome} e {p2.nome} estão interagindo em {local_id}."
+                                obs_result = self.agente_llm.interpretar_observacao(obs, cena)
+                                self.estado.registrar_evento(
+                                    f"👁 {obs.nome} observa {p1.nome} e {p2.nome}",
+                                    {
+                                        "observador": obs.nome,
+                                        "interpretacao": obs_result.get("interpretacao", ""),
+                                        "reacao": obs_result.get("reacao_interna", ""),
+                                        "mudou_opiniao": obs_result.get("mudanca_opiniao", False)
+                                    }
+                                )
+                            except Exception:
+                                pass
+
                     # COMPARTILHAR CONHECIMENTO!
                     locais_novos_p1 = p1.compartilhar_conhecimento(p2)
                     locais_novos_p2 = p2.compartilhar_conhecimento(p1)
-                    
+
                     total_novos = len(locais_novos_p1) + len(locais_novos_p2)
                     if total_novos > 0:
                         self.estado.registrar_evento(
@@ -1182,21 +1242,22 @@ class Simulacao:
                                 "locais_novos": locais_novos_p1 + locais_novos_p2
                             }
                         )
-                    
+
                     # ENSINO AUTOMÁTICO!
                     self._tentar_ensino(p1, p2)
                     self._tentar_ensino(p2, p1)
-                    
+
                     # TROCA AUTOMÁTICA!
                     self._tentar_troca(p1, p2)
-                    
-                    self.estado.registrar_evento(
-                        f"{p1.nome} e {p2.nome} interagiram",
-                        {
-                            "personagens": [p1.id, p2.id],
-                            "local": local_id
-                        }
-                    )
+
+                    if not dialogo:
+                        self.estado.registrar_evento(
+                            f"{p1.nome} e {p2.nome} interagiram",
+                            {
+                                "personagens": [p1.id, p2.id],
+                                "local": local_id
+                            }
+                        )
     
     def _tentar_ensino(self, professor: Personagem, aluno: Personagem):
         """
@@ -1326,25 +1387,37 @@ class Simulacao:
         """Display padrão no terminal"""
         print("\n" + "=" * 60)
         print(resumo["resumo_geral"])
-        
+
+        # Mostrar diálogos e observações do histórico recente
+        for h in self.estado.historico[-5:]:
+            detalhes = h.get("detalhes", {})
+            if "dialogo" in detalhes:
+                d = detalhes["dialogo"]
+                for nome, fala in d.items():
+                    if nome.startswith("tom_"):
+                        continue
+                    print(f"   💬 {nome}: \"{fala}\"")
+            if "interpretacao" in detalhes:
+                print(f"   👁 {detalhes.get('observador', '?')}: \"{detalhes['interpretacao']}\"")
+
         if resumo["encontros"]:
             print("\n📚 Encontros:")
             for e in resumo["encontros"]:
                 emoji = "✅" if e.get("resultado") == "adequacao" else "❌" if e.get("resultado") == "dissolucao" else "➖"
                 desc = e.get("detalhes") or e.get("descricao", "")
                 print(f"   {emoji} {e['personagem']}: {desc} ({e.get('delta', 0):+.2f})")
-        
+
         if resumo["movimentos"]:
             print("\n🚶 Movimentos:")
             for m in resumo["movimentos"]:
                 print(f"   {m['personagem']}: {m['origem']} → {m['destino']}")
-        
+
         if resumo.get("crafting"):
             print("\n🔧 Crafting:")
             for c in resumo["crafting"]:
                 emoji = "✅" if c.get("sucesso") else "❌"
                 print(f"   {emoji} {c.get('personagem', '?')}: {c.get('mensagem', '')}")
-        
+
         print("=" * 60)
     
     # =========================================================================

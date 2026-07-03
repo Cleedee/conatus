@@ -51,7 +51,7 @@ class ConfigLLM:
     
     # Parâmetros de geração
     temperature: float = 0.7
-    max_tokens: int = 200
+    max_tokens: int = 30
     top_p: float = 0.9
     
     # Timeout (segundos)
@@ -380,50 +380,24 @@ Responda APENAS com o NÚMERO da opção escolhida (1 a {len(encontros)}):"""
         contexto: str
     ) -> str:
         """
-        Gera prompt para resposta social (diálogo)
+        Gera prompt curto para resposta social (diálogo)
         """
         relacao = personagem.get_ou_criar_relacao(interlocutor.id)
-
-        skills_info = personagem.skills_conhecidas_de(interlocutor.id)
-        skills_str = f"\n  Habilidades observadas: {skills_info}" if skills_info else ""
-
-        itens_v = interlocutor.itens_visiveis
-        itens_str = f"\n  Itens visíveis: {', '.join(itens_v)}" if itens_v else ""
 
         motiv_str = ", ".join(
             f"{k}: {v:.0%}"
             for k, v in personagem.personalidade.motivacoes.items()
         )
 
-        prompt = f"""Você é {personagem.personalidade.nome}, {personagem.personalidade.descricao.lower()}
+        prompt = f"""Você é {personagem.personalidade.nome}, {personagem.personalidade.arquetipo}.
+{personagem.personalidade.descricao}
+Motivações: {motiv_str}
+Afeto por {interlocutor.nome}: {relacao.afeto:.2f}
+Confiança: {relacao.confianca:.2f}
 
-INTERLOCUTOR: {interlocutor.nome} ({interlocutor.personalidade.arquetipo})
-RELAÇÃO COM {interlocutor.nome}:
-- Afeto: {relacao.afeto:.2f} (-1 a 1) | Confiança: {relacao.confianca:.2f} (0 a 1)
-- {relacao.encontros_positivos} encontros positivos, {relacao.encontros_negativos} negativos{skills_str}{itens_str}
+Contexto: {contexto}
 
-SEU ESTADO:
-- Potência: {personagem.potencia_atual:.0%} | Alegria: {personagem.afetos.alegria:.2f} | Temor: {personagem.afetos.temor:.2f}
-- Fome: {personagem.necessidades.fome:.0%} | Sede: {personagem.necessidades.sede:.0%}
-
-SUA PERSONALIDADE:
-- Valores: {', '.join(personagem.personalidade.valores)}
-- Medos: {', '.join(personagem.personalidade.medos)}
-- Motivações: {motiv_str}
-- {personagem.personalidade.descricao}
-
-CONTEXTO DA INTERAÇÃO:
-{contexto}
-
-Como você, {personagem.personalidade.nome}, responde? Seja autêntica à sua personalidade, ao que precisa agora e à sua relação com {interlocutor.nome}.
-
-Responda APENAS em JSON:
-{{
-    "fala": "<o que você diz>",
-    "tom": "<amigável|neutro|desconfiado|hostil|ajudativo>",
-    "pensamento": "<o que pensa internamente>"
-}}
-"""
+Fale uma frase curta como {personagem.personalidade.nome} respondendo a {interlocutor.nome}:"""
         return prompt
 
     @staticmethod
@@ -432,34 +406,15 @@ Responda APENAS em JSON:
         cena: str
     ) -> str:
         """
-        Gera prompt para observação de cena
+        Gera prompt curto para observação de cena
         """
-        motiv_str = ", ".join(
-            f"{k}: {v:.0%}"
-            for k, v in personagem.personalidade.motivacoes.items()
-        )
+        prompt = f"""Você é {personagem.personalidade.nome}, {personagem.personalidade.arquetipo}.
+{personagem.personalidade.descricao}
+Medos: {', '.join(personagem.personalidade.medos)}
 
-        prompt = f"""Você é {personagem.personalidade.nome}, {personagem.personalidade.descricao.lower()}.
+Você observa: {cena}
 
-VOCÊ OBSERVA:
-{cena}
-
-SEU ESTADO:
-- Potência: {personagem.potencia_atual:.0%}
-- Razão: {personagem.razao_vs_paixao:.0%}
-- Alegria: {personagem.afetos.alegria:.2f}
-- Medos: {', '.join(personagem.personalidade.medos)}
-- Motivações: {motiv_str}
-
-Como {personagem.personalidade.nome}, o que você pensa sobre o que vê? Essa cena muda algo na sua visão de mundo?
-
-Responda APENAS em JSON:
-{{
-    "interpretacao": "<o que você entende da cena>",
-    "reacao_interna": "<como se sente>",
-    "mudanca_opiniao": <true|false>
-}}
-"""
+O que você pensa sobre isso? Uma frase curta:"""
         return prompt
 
 
@@ -505,21 +460,33 @@ class ParseRespostas:
     
     @staticmethod
     def parsear_resposta_social(resposta: str) -> dict:
-        """Parseia resposta social"""
-        return ParseRespostas._extrair_json(resposta, {
-            "fala": "...",
-            "tom": "neutro",
-            "pensamento": "..."
-        })
-    
+        """Parseia resposta social — extrai JSON ou usa texto puro"""
+        resultado = ParseRespostas._extrair_json(resposta, None)
+        if resultado:
+            resultado.setdefault("fala", "...")
+            resultado.setdefault("tom", "neutro")
+            resultado.setdefault("pensamento", "")
+            return resultado
+        # Fallback: usar texto puro como fala
+        fala = resposta.strip().strip('"').strip("'").strip()
+        if len(fala) > 200:
+            fala = fala[:200]
+        return {"fala": fala, "tom": "neutro", "pensamento": ""}
+
     @staticmethod
     def parsear_observacao(resposta: str) -> dict:
-        """Parseia resposta de observação"""
-        return ParseRespostas._extrair_json(resposta, {
-            "interpretacao": "Nenhuma interpretação",
-            "reacao_interna": "neutro",
-            "mudanca_opiniao": False
-        })
+        """Parseia resposta de observação — extrai JSON ou usa texto puro"""
+        resultado = ParseRespostas._extrair_json(resposta, None)
+        if resultado:
+            resultado.setdefault("interpretacao", "Nenhuma interpretação")
+            resultado.setdefault("reacao_interna", "neutro")
+            resultado.setdefault("mudanca_opiniao", False)
+            return resultado
+        # Fallback: usar texto puro como interpretação
+        texto = resposta.strip().strip('"').strip("'").strip()
+        if len(texto) > 200:
+            texto = texto[:200]
+        return {"interpretacao": texto, "reacao_interna": "neutro", "mudanca_opiniao": False}
     
     @staticmethod
     def _extrair_json(texto: str, padrao: dict) -> dict:
