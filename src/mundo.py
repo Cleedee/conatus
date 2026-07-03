@@ -10,6 +10,8 @@ Integra todos os componentes:
 """
 
 from __future__ import annotations
+import concurrent.futures
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, Callable
@@ -309,6 +311,10 @@ class Simulacao:
         else:
             self.agente_llm = None
         
+        # LLM assíncrono — fila de futuros: tick -> (personagem_id, Future)
+        self._llm_fila: dict[int, tuple[str, "concurrent.futures.Future"]] = {}
+        self._prox_personagem_idx = 0
+        
         # Estado
         self.estado = EstadoMundo()
         
@@ -373,18 +379,6 @@ class Simulacao:
             "resumo_geral": ""
         }
 
-        # Reset contador LLM para este tick
-        self._llm_chamadas_tick = 0
-        # Só usa LLM a cada N ticks
-        self._llm_gate = getattr(self, '_llm_gate', 0)
-        self._usar_llm_agora = (
-            self.agente_llm
-            and self.agente_llm.verificar_pronto()
-            and self.estado.tick_atual >= self._llm_gate
-        )
-        if self._usar_llm_agora:
-            self._llm_gate = self.estado.tick_atual + 8  # próximo uso daqui 8 ticks
-
         # 1. AVANÇAR TEMPO E MUNDO
         self._tick_mundo()
         
@@ -398,17 +392,28 @@ class Simulacao:
             )
             resumo["eventos"].append(novo_evento.nome)
         
-        # 3. PROCESSAR CADA PERSONAGEM
+        # 3. COLHER DECISÕES LLM PENDENTES (assíncrono, tick anterior)
+        decisoes_llm = self._colher_decisoes_llm()
+        
+        # 4. PROCESSAR CADA PERSONAGEM
         for personagem in self.personagens:
-            resultado_personagem = self._processar_personagem(personagem)
+            predef = decisoes_llm.get(personagem.id)
+            resultado_personagem = self._processar_personagem(
+                personagem,
+                encontro_escolhido=predef.get("encontro") if predef else None,
+                decisao_info=predef or {},
+            )
             resumo["encontros"].extend(resultado_personagem["encontros"])
             resumo["movimentos"].extend(resultado_personagem["movimentos"])
             resumo["crafting"].extend(resultado_personagem["crafting"])
         
-        # 4. RESOLVER INTERAÇÕES PENDENTES
+        # 5. DISPARAR PRÓXIMO LLM (assíncrono, não bloqueia)
+        self._disparar_proximo_llm()
+        
+        # 6. RESOLVER INTERAÇÕES PENDENTES
         self._resolver_interacoes()
         
-        # 5. ATUALIZAR DESENVOLVIMENTO DOS LOCAIS
+        # 7. ATUALIZAR DESENVOLVIMENTO DOS LOCAIS
         for local in self.mapa.locais.values():
             nivel_antes = local.nivel_desenvolvimento
             local.recalcular_nivel(self.personagens)
@@ -419,10 +424,10 @@ class Simulacao:
                     {"local": local.id, "nivel": local.nivel_desenvolvimento}
                 )
         
-        # 6. gerar resumo
+        # 8. gerar resumo
         resumo["resumo_geral"] = self._gerar_resumo_tick()
         
-        # 6. DISPLAY
+        # 9. DISPLAY
         self.callback_display(resumo)
         
         return resumo
@@ -432,7 +437,196 @@ class Simulacao:
         self.estado.avancar_tick()
         self.mapa.tick(self.estado.estacao_atual)
     
-    def _processar_personagem(self, personagem: Personagem) -> dict:
+    def _obter_encontros(self, personagem: Personagem) -> list[EncontroDisponivel]:
+        """Centraliza a coleta de encontros disponíveis para um personagem"""
+        encontros = self.motor_encontros.obter_encontros_para_personagem(
+            personagem,
+            self.personagens,
+            self.estado.hora,
+            self.estado.eventos_ativos
+        )
+        
+        local = self.mapa.get_local(personagem.local_atual)
+        
+        # Adicionar opções de locomoção
+        if local:
+            for destino_id, tempo in local.conexoes.items():
+                destino_local = self.mapa.get_local(destino_id)
+                if destino_local and not destino_local.lotado:
+                    conhecido = personagem.local_conhecido(destino_id)
+                    if conhecido:
+                        recursos = personagem.get_recursos_conhecidos(destino_id)
+                        desc = f"Ir para {destino_local.nome} ({tempo} ticks)"
+                        if recursos:
+                            desc += f" - recursos: {', '.join(recursos[:2])}"
+                    else:
+                        desc = f"Explorar área desconhecida ({tempo} ticks)"
+                    
+                    encontros.append(EncontroDisponivel(
+                        id=f"mover_{destino_id}",
+                        origem=OrigemEncontro.RECURSO,
+                        tipo=TipoEncontro.FISICO,
+                        objeto=f"mover_{destino_id}",
+                        descricao=desc,
+                        intensidade=0.1,
+                        disponibilidade=DisponibilidadeEncontro.SEMPRE,
+                        tag="locomocao"
+                    ))
+        
+        # Adicionar opções de CRAFTING
+        materiais_dict = personagem.inventario.get_materiais_dict()
+        habilidades_dict = {nome: hab.nivel for nome, hab in personagem.habilidades.items()}
+        
+        receitas_possiveis = self.motor_crafting.banco.listar_receitas_possiveis(
+            materiais_dict, habilidades_dict
+        )
+        
+        for receita in receitas_possiveis[:3]:
+            if receita.tipo == TipoReceita.CONSTRUCAO:
+                motivo = (
+                    personagem.necessidades.abrigo < 0.5
+                    or personagem.moradia_local == personagem.local_atual
+                    or (local and bool(local.construcoes))
+                )
+                if not motivo:
+                    continue
+            
+            encontros.append(EncontroDisponivel(
+                id=f"craft_{receita.id}",
+                origem=OrigemEncontro.RECURSO,
+                tipo=TipoEncontro.COGNITIVO,
+                objeto=f"craft_{receita.id}",
+                descricao=f"🔧 {receita.nome} ({receita.tipo.value})",
+                intensidade=0.3,
+                disponibilidade=DisponibilidadeEncontro.SEMPRE,
+                tag="crafting"
+            ))
+        
+        # Adicionar opções de DEPÓSITO
+        depositaveis = ["comida", "madeira", "colheita", "pedra", "ferramentas"]
+        for dep_rec_nome in depositaveis:
+            if local:
+                rec = local.get_recurso(dep_rec_nome)
+                if not rec or not rec.disponivel:
+                    continue
+            tem_para_depositar = False
+            if dep_rec_nome == "comida":
+                for c in ("comida", "carne_assada", "sopa", "pao", "refeicao", "carne_defumada"):
+                    if personagem.inventario.tem_material(c, 1):
+                        tem_para_depositar = True
+                        break
+            elif personagem.inventario.tem_material(dep_rec_nome, 1):
+                tem_para_depositar = True
+            
+            if tem_para_depositar:
+                encontros.append(EncontroDisponivel(
+                    id=f"depositar_{dep_rec_nome}",
+                    origem=OrigemEncontro.RECURSO,
+                    tipo=TipoEncontro.FISICO,
+                    objeto=f"depositar_{dep_rec_nome}",
+                    descricao=f"📥 Depositar {dep_rec_nome} no depósito comum",
+                    intensidade=0.2,
+                    disponibilidade=DisponibilidadeEncontro.SEMPRE,
+                    tag="producao"
+                ))
+        
+        # Garantir que sempre haja encontros
+        if not encontros:
+            encontros.append(EncontroDisponivel(
+                id="esperar",
+                origem=OrigemEncontro.AMBIENTAL,
+                tipo=TipoEncontro.AMBIENTAL,
+                objeto="esperar",
+                descricao="Esperar e observar o ambiente",
+                intensidade=0.05,
+                disponibilidade=DisponibilidadeEncontro.SEMPRE,
+                tag="esperar"
+            ))
+        
+        return encontros
+
+    def _colher_decisoes_llm(self) -> dict[str, dict]:
+        """Verifica futuros LLM pendentes e retorna decisões prontas"""
+        resultado = {}
+        ticks_prontos = []
+        
+        for tick_origem, (pid, futuro) in self._llm_fila.items():
+            if futuro.done():
+                try:
+                    decisao = futuro.result()
+                    resultado[pid] = decisao
+                    self.estado.registrar_evento(
+                        f"LLM→{pid} (tick {tick_origem}): {decisao.get('razao','')[:60]}",
+                        {"decisao": decisao}
+                    )
+                except Exception as e:
+                    self.estado.registrar_evento(
+                        f"LLM falhou para {pid}: {e}", {}
+                    )
+                ticks_prontos.append(tick_origem)
+        
+        # Limpar futuros concluídos
+        for t in ticks_prontos:
+            del self._llm_fila[t]
+        
+        return resultado
+
+    def _disparar_proximo_llm(self):
+        """Dispara LLM para o próximo personagem (round-robin, assíncrono)"""
+        if not self.agente_llm or not self.agente_llm.verificar_pronto():
+            return
+        
+        # Escolher próximo personagem (round-robin)
+        n = len(self.personagens)
+        for _ in range(n):
+            p = self.personagens[self._prox_personagem_idx]
+            self._prox_personagem_idx = (self._prox_personagem_idx + 1) % n
+            
+            # Pular personagens inativos
+            if not p.pode_interagir or p.dormindo or p.estado == EstadoPersonagem.LOCOMOVENDO:
+                continue
+            
+            # Já tem um futuro pendente para este personagem?
+            if any(pid == p.id for _, (pid, _) in self._llm_fila.items()):
+                continue
+            
+            # Coletar encontros e disparar
+            try:
+                encontros = self._obter_encontros(p)
+                if not encontros:
+                    continue
+                contexto = {
+                    "local": p.local_atual,
+                    "hora": self.estado.hora,
+                    "outros": self._listar_outros_no_local(p)
+                }
+                
+                # Future manual + daemon thread (não bloqueia exit)
+                futuro = concurrent.futures.Future()
+                def rodar(fut, llm, pers, encs, ctx):
+                    try:
+                        res = llm.decidir_acao(pers, encs, ctx)
+                        fut.set_result(res)
+                    except BaseException as e:
+                        fut.set_exception(e)
+                
+                t = threading.Thread(
+                    target=rodar,
+                    args=(futuro, self.agente_llm, p, encontros, contexto),
+                    daemon=True,
+                )
+                t.start()
+                self._llm_fila[self.estado.tick_atual] = (p.id, futuro)
+            except Exception:
+                pass
+            break  # Só dispara um por tick
+
+    def _processar_personagem(
+        self,
+        personagem: Personagem,
+        encontro_escolhido: Optional[EncontroDisponivel] = None,
+        decisao_info: Optional[dict] = None,
+    ) -> dict:
         """
         Processa um personagem no tick atual
         """
@@ -510,146 +704,24 @@ class Simulacao:
                 "resultado": resultado_encontro.resultado.value
             })
         
-        # Obter encontros disponíveis
-        encontros = self.motor_encontros.obter_encontros_para_personagem(
-            personagem,
-            self.personagens,
-            self.estado.hora,
-            self.estado.eventos_ativos
-        )
-        
-        # Adicionar opções de locomoção
-        local = self.mapa.get_local(personagem.local_atual)
-        if local:
-            for destino_id, tempo in local.conexoes.items():
-                destino_local = self.mapa.get_local(destino_id)
-                if destino_local and not destino_local.lotado:
-                    # Verificar se o personagem conhece o destino
-                    conhecido = personagem.local_conhecido(destino_id)
-                    
-                    if conhecido:
-                        # Local conhecido - mostrar informações
-                        recursos = personagem.get_recursos_conhecidos(destino_id)
-                        desc = f"Ir para {destino_local.nome} ({tempo} ticks)"
-                        if recursos:
-                            desc += f" - recursos: {', '.join(recursos[:2])}"
-                    else:
-                        # Local desconhecido - mostrar como exploração
-                        desc = f"Explorar área desconhecida ({tempo} ticks)"
-                    
-                    encontros.append(EncontroDisponivel(
-                        id=f"mover_{destino_id}",
-                        origem=OrigemEncontro.RECURSO,
-                        tipo=TipoEncontro.FISICO,
-                        objeto=f"mover_{destino_id}",
-                        descricao=desc,
-                        intensidade=0.1,
-                        disponibilidade=DisponibilidadeEncontro.SEMPRE,
-                        tag="locomocao"
-                    ))
-        
-        # Adicionar opções de CRAFTING
-        materiais_dict = personagem.inventario.get_materiais_dict()
-        habilidades_dict = {nome: hab.nivel for nome, hab in personagem.habilidades.items()}
-        
-        receitas_possiveis = self.motor_crafting.banco.listar_receitas_possiveis(
-            materiais_dict, habilidades_dict
-        )
-        
-        for receita in receitas_possiveis[:3]:  # Limitar a 3 opções
-            # Construções só são oferecidas se há motivo para construir aqui
-            if receita.tipo == TipoReceita.CONSTRUCAO:
-                motivo = (
-                    personagem.necessidades.abrigo < 0.5
-                    or personagem.moradia_local == personagem.local_atual
-                    or (local and bool(local.construcoes))
-                )
-                if not motivo:
-                    continue
-            
-            encontros.append(EncontroDisponivel(
-                id=f"craft_{receita.id}",
-                origem=OrigemEncontro.RECURSO,
-                tipo=TipoEncontro.COGNITIVO,
-                objeto=f"craft_{receita.id}",
-                descricao=f"🔧 {receita.nome} ({receita.tipo.value})",
-                intensidade=0.3,
-                disponibilidade=DisponibilidadeEncontro.SEMPRE,
-                tag="crafting"
-            ))
-        
-        # Adicionar opções de DEPÓSITO (se personagem tem itens para depositar)
-        depositaveis = ["comida", "madeira", "colheita", "pedra", "ferramentas"]
-        for dep_rec_nome in depositaveis:
-            # Verificar se local aceita esse recurso
-            if local:
-                rec = local.get_recurso(dep_rec_nome)
-                if not rec or not rec.disponivel:
-                    continue
-            # Verificar inventário
-            tem_para_depositar = False
-            if dep_rec_nome == "comida":
-                for c in ("comida", "carne_assada", "sopa", "pao", "refeicao", "carne_defumada"):
-                    if personagem.inventario.tem_material(c, 1):
-                        tem_para_depositar = True
-                        break
-            elif personagem.inventario.tem_material(dep_rec_nome, 1):
-                tem_para_depositar = True
-            
-            if tem_para_depositar:
-                encontros.append(EncontroDisponivel(
-                    id=f"depositar_{dep_rec_nome}",
-                    origem=OrigemEncontro.RECURSO,
-                    tipo=TipoEncontro.FISICO,
-                    objeto=f"depositar_{dep_rec_nome}",
-                    descricao=f"📥 Depositar {dep_rec_nome} no depósito comum",
-                    intensidade=0.2,
-                    disponibilidade=DisponibilidadeEncontro.SEMPRE,
-                    tag="producao"
-                ))
-        
-        # Garantir que sempre haja encontros
-        if not encontros:
-            encontros.append(EncontroDisponivel(
-                id="esperar",
-                origem=OrigemEncontro.AMBIENTAL,
-                tipo=TipoEncontro.AMBIENTAL,
-                objeto="esperar",
-                descricao="Esperar e observar o ambiente",
-                intensidade=0.05,
-                disponibilidade=DisponibilidadeEncontro.SEMPRE,
-                tag="esperar"
-            ))
-        
-        # Decidir ação
-        encontro_escolhido = None
-        decisao_info = {}
-
-        # Usar LLM se disponível (limitado a 1 chamada de decisão por tick)
-        usar_llm = self._usar_llm_agora and getattr(self, '_llm_chamadas_tick', 0) < 1
-        if usar_llm:
-            self._llm_chamadas_tick = getattr(self, '_llm_chamadas_tick', 0) + 1
-            contexto = {
-                "local": personagem.local_atual,
-                "hora": self.estado.hora,
-                "outros": self._listar_outros_no_local(personagem)
-            }
-            decisao = self.agente_llm.decidir_acao(
-                personagem, encontros, contexto
-            )
-            encontro_escolhido = decisao.get("encontro")
-            decisao_info = decisao
-        
-        # Fallback: decisão simples se LLM falhou
+        # Obter encontros disponíveis (se não veio pré-selecionado)
         if encontro_escolhido is None:
+            encontros = self._obter_encontros(personagem)
+            
+            # Fallback: decisão simples
             encontro_escolhido = self._decidir_acao_simples(personagem, encontros)
+            
+            # Último fallback: escolher aleatório
+            if encontro_escolhido is None and encontros:
+                encontro_escolhido = random.choice(encontros)
         
-        # Último fallback: escolher aleatório
-        if encontro_escolhido is None and encontros:
-            encontro_escolhido = random.choice(encontros)
-        
-        # Registrar pensamento
+        # Registrar pensamento do LLM
         if decisao_info:
+            resultado["decisoes"].append({
+                "personagem": personagem.nome,
+                "razao": decisao_info.get("razao", ""),
+                "emocao": decisao_info.get("emocao", "neutro")
+            })
             resultado["decisoes"].append({
                 "personagem": personagem.nome,
                 "razao": decisao_info.get("razao", ""),
