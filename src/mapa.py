@@ -112,6 +112,39 @@ class Local:
     clima_local: CondicaoClima = CondicaoClima.NORMAL
     ocupacao_atual: int = 0
     
+    # Desenvolvimento (construções construídas aqui)
+    construcoes: dict[str, int] = field(default_factory=dict)
+    nivel_desenvolvimento: int = 0  # 0=ermo, 1=acampamento, 2=povoado, 3=vila
+    
+    def adicionar_construcao(self, nome: str):
+        """Registra uma construção erguida neste local"""
+        self.construcoes[nome] = self.construcoes.get(nome, 0) + 1
+    
+    def recalcular_nivel(self, personagens: list) -> int:
+        """Recalcula nível de desenvolvimento baseado em construções e moradores"""
+        total_construcoes = sum(self.construcoes.values())
+        fogueiras = self.construcoes.get("fogueira", 0)
+        abrigos = self.construcoes.get("abrigo", 0)
+        cabanas = self.construcoes.get("cabana", 0)
+        armazens = self.construcoes.get("armazem", 0)
+        moradores = sum(1 for p in personagens if p.moradia_local == self.id)
+        
+        if total_construcoes >= 10 and armazens >= 1 and cabanas + abrigos >= 3 and moradores >= 5:
+            self.nivel_desenvolvimento = 3
+        elif total_construcoes >= 5 and armazens >= 1 and (cabanas + abrigos) >= 2 and moradores >= 3:
+            self.nivel_desenvolvimento = 2
+        elif fogueiras >= 1 and (abrigos + cabanas) >= 1 and moradores >= 1:
+            self.nivel_desenvolvimento = 1
+        else:
+            self.nivel_desenvolvimento = 0
+        return self.nivel_desenvolvimento
+    
+    @property
+    def titulo_nivel(self) -> str:
+        """Nome do nível de desenvolvimento"""
+        nomes = {0: "ermo", 1: "acampamento", 2: "povoado", 3: "vila"}
+        return nomes.get(self.nivel_desenvolvimento, "ermo")
+    
     def tick(self):
         """Atualiza estado do local a cada tick"""
         # Renovar recursos
@@ -168,12 +201,17 @@ class Local:
         linhas = [
             f"📍 {self.nome}",
             f"   {self.descricao}",
-            f"   Tipo: {self.tipo.value}",
+            f"   Tipo: {self.tipo.value} | Nível: {self.titulo_nivel}",
             f"   Perigo: {self.nivel_perigo}",
             f"   Conforto: {self.conforto:.0%}",
             f"   Clima: {self.clima_local.value}",
             f"   Ocupação: {self.ocupacao_atual}/{self.capacidade}"
         ]
+        
+        # Construções
+        if self.construcoes:
+            partes = [f"{qtd}x {nome}" for nome, qtd in self.construcoes.items()]
+            linhas.append(f"   Construções: {', '.join(partes)}")
         
         # Recursos
         if self.recursos:
@@ -364,7 +402,9 @@ def criar_mapa_padrao() -> Mapa:
             "montanha": 4,
             "planicie": 2,
             "rio": 2
-        }
+        },
+        construcoes={"fogueira": 3, "abrigo": 4, "armazem": 2, "cabana": 1},
+        nivel_desenvolvimento=3
     )
     
     # =========================================================================

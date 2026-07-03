@@ -311,6 +311,7 @@ class Simulacao:
         local = self.mapa.get_local(personagem.local_atual)
         if local:
             local.ocupacao_atual += 1
+            local.recalcular_nivel(self.personagens)
     
     def remover_personagem(self, personagem_id: str) -> Optional[Personagem]:
         """Remove personagem da simulação"""
@@ -379,7 +380,18 @@ class Simulacao:
         # 4. RESOLVER INTERAÇÕES PENDENTES
         self._resolver_interacoes()
         
-        # 5. gerar resumo
+        # 5. ATUALIZAR DESENVOLVIMENTO DOS LOCAIS
+        for local in self.mapa.locais.values():
+            nivel_antes = local.nivel_desenvolvimento
+            local.recalcular_nivel(self.personagens)
+            if local.nivel_desenvolvimento > nivel_antes:
+                nomes = {0: "ermo", 1: "acampamento", 2: "povoado", 3: "vila"}
+                self.estado.registrar_evento(
+                    f"{local.nome} evoluiu para {nomes[local.nivel_desenvolvimento]}",
+                    {"local": local.id, "nivel": local.nivel_desenvolvimento}
+                )
+        
+        # 6. gerar resumo
         resumo["resumo_geral"] = self._gerar_resumo_tick()
         
         # 6. DISPLAY
@@ -924,6 +936,20 @@ class Simulacao:
         # Ganhar XP
         if resultado.xp_ganho > 0:
             personagem.ganhar_xp(receita.habilidade_requerida, resultado.xp_ganho)
+        
+        # Se for construção, registrar no local
+        local = self.mapa.get_local(personagem.local_atual)
+        if local and receita.tipo == TipoReceita.CONSTRUCAO and resultado.itens_criados:
+            for nome, qtd in resultado.itens_criados:
+                for _ in range(qtd):
+                    local.adicionar_construcao(nome)
+            # Pode reivindicar moradia se construiu abrigo/cabana
+            if resultado.resultado.value == "sucesso":
+                for nome, qtd in resultado.itens_criados:
+                    if nome in ("abrigo", "cabana"):
+                        personagem.moradia_local = local.id
+                        personagem.tem_moradia = True
+                        break
         
         # Registrar evento
         self.estado.registrar_evento(
