@@ -54,15 +54,15 @@ class ConfigLLM:
     max_tokens: int = 200
     top_p: float = 0.9
     
-    # Timeout
-    timeout: int = 30
+    # Timeout (segundos)
+    timeout: int = 120
 
 
 # =============================================================================
 # FUNÇÕES AUXILIARES HTTP
 # =============================================================================
 
-def http_post_json(url: str, data: dict, timeout: int = 30) -> dict:
+def http_post_json(url: str, data: dict, timeout: int = 120) -> dict:
     """Faz POST com JSON usando urllib"""
     headers = {"Content-Type": "application/json"}
     data_bytes = json.dumps(data).encode("utf-8")
@@ -76,7 +76,7 @@ def http_post_json(url: str, data: dict, timeout: int = 30) -> dict:
         raise Exception(f"Erro HTTP: {e}")
 
 
-def http_get_json(url: str, timeout: int = 10) -> Optional[dict]:
+def http_get_json(url: str, timeout: int = 30) -> Optional[dict]:
     """Faz GET e retorna JSON usando urllib"""
     req = urllib.request.Request(url)
     
