@@ -46,12 +46,12 @@ class RecursoLocal:
     maximo: float = 1.0
     renovavel: bool = True
     
-    def renovar(self):
+    def renovar(self, multiplicador: float = 1.0):
         """Renova o recurso (chamado a cada tick)"""
         if self.renovavel and self.quantidade_atual < self.maximo:
             self.quantidade_atual = min(
                 self.maximo,
-                self.quantidade_atual + self.taxa_renovacao
+                self.quantidade_atual + self.taxa_renovacao * multiplicador
             )
     
     def consumir(self, quantidade: float) -> float:
@@ -147,10 +147,26 @@ class Local:
     
     def tick(self):
         """Atualiza estado do local a cada tick"""
-        # Renovar recursos
+        # Calcular multiplicador climático para renovação
+        if self.clima_local == CondicaoClima.SECA:
+            mult_hidrico = 0.0
+            mult_comida = 0.5
+        elif self.clima_local == CondicaoClima.CHUVA:
+            mult_hidrico = 2.0
+            mult_comida = 1.2
+        else:
+            mult_hidrico = 1.0
+            mult_comida = 1.0
+
+        # Renovar recursos com bônus/penalidade climática
         for recurso in self.recursos:
-            recurso.renovar()
-        
+            if recurso.nome in ("água", "peixe"):
+                recurso.renovar(mult_hidrico)
+            elif recurso.nome in ("comida", "colheita", "caça"):
+                recurso.renovar(mult_comida)
+            else:
+                recurso.renovar()
+
         # Chance de mudar clima
         if random.random() < 0.05:  # 5% por tick
             self._mudar_clima()
