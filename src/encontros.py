@@ -333,6 +333,7 @@ class GeradorEncontros:
                     "objeto": "sol_forte",
                     "descricao": "Expor-se ao sol forte",
                     "intensidade": 0.1,
+                    "requer_hora": (6, 20),
                     "tag": "clima"
                 }
             ],
