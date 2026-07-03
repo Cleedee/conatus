@@ -1,5 +1,5 @@
 """
-Módulo de Personagem — Simulação Social Espinozista
+Módulo de Personagem — Simulação Conatus
 
 Implementa a classe Personagem com estado baseado na ética de Spinoza:
 - Potência de agir

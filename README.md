@@ -1,6 +1,6 @@
-# Simulação Social Espinozista
+# Conatus
 
-Simulação social emergente onde múltiplos LLMs pequenos interpretam personagens que interagem num mundo compartilhado.
+Simulação social emergente onde múltiplos LLMs pequenos interpretam personagens que interagem num mundo compartilhado. O nome **Conatus** — termo central da *Ética* de Spinoza — representa o esforço de cada ser para perseverar e aumentar sua potência de agir.
 
 ## 📚 Fundamentos
 

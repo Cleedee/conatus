@@ -1,5 +1,5 @@
 """
-Módulo Mundo — Orquestrador da Simulação Espinozista
+Módulo Mundo — Orquestrador da Simulação Conatus
 
 Integra todos os componentes:
 - Mapa e locais

@@ -1,8 +1,8 @@
-# AGENTS.md — Mundo Aberto
+# AGENTS.md — Conatus
 
 ## Projeto
 
-Simulação social emergente espinozista com múltiplos personagens interpretados por LLMs pequenos. Cada interação é um "encontro" que afeta a potência de agir do personagem (adequação/dissolução).
+Simulação social emergente espinozista com múltiplos personagens interpretados por LLMs pequenos. O nome Conatus refere-se ao esforço fundamental de cada ser para perseverar e aumentar sua potência de agir (Ética de Spinoza). Cada interação é um "encontro" que afeta a potência de agir do personagem (adequação/dissolução).
 
 ## Stack
 

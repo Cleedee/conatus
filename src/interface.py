@@ -1,5 +1,5 @@
 """
-Módulo de Interface — Modo Interativo da Simulação Espinozista
+Módulo de Interface — Modo Interativo da Simulação Conatus
 
 Fornece o REPL (cmd.Cmd) para exploração ao vivo da simulação.
 """

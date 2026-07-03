@@ -1,5 +1,5 @@
 """
-Módulo de Encontros — Motor de Simulação Espinozista
+Módulo de Encontros — Motor de Simulação Conatus
 
 Gerencia todos os encontros possíveis na simulação:
 - Encontros com recursos/objetos

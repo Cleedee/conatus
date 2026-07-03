@@ -1,5 +1,5 @@
 """
-Módulo de Mapa — Sistema de Espaço na Simulação Espinozista
+Módulo de Mapa — Sistema de Espaço na Simulação Conatus
 
 Define locais, conexões, distâncias e propriedades do mundo.
 """

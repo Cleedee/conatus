@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "conatus"
+version = "0.1.0"
+description = "Simulação social emergente espinozista com múltiplos personagens interpretados por LLMs pequenos"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Cláudio Torcato"},
+]
+keywords = ["spinoza", "simulation", "llm", "social-simulation", "emergent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Games/Entertainment :: Simulation",
+]
+requires-python = ">=3.10"
+
+[project.urls]
+Homepage = "https://github.com/Cleedee/conatus"
+Repository = "https://github.com/Cleedee/conatus"
