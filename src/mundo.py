@@ -1965,7 +1965,7 @@ class Simulacao:
 # CRIAÇÃO RÁPIDA DE SIMULAÇÃO
 # =============================================================================
 
-def criar_simulacao_padrao() -> Simulacao:
+def criar_simulacao_padrao(usar_llm: bool = True, config_llm: ConfigLLM = None) -> Simulacao:
     """Cria simulação com personagens padrão"""
     mapa = criar_mapa_padrao()
     
@@ -2049,7 +2049,7 @@ def criar_simulacao_padrao() -> Simulacao:
     )
     personagens.append(Personagem(lucia, local_inicial="vila"))
     
-    return Simulacao(mapa=mapa, personagens=personagens)
+    return Simulacao(mapa=mapa, personagens=personagens, usar_llm=usar_llm, config_llm=config_llm)
 
 
 # =============================================================================
@@ -2057,19 +2057,39 @@ def criar_simulacao_padrao() -> Simulacao:
 # =============================================================================
 
 if __name__ == "__main__":
-    import sys
+    import argparse
     
-    sim = criar_simulacao_padrao()
+    parser = argparse.ArgumentParser(description="Mundo Aberto — Simulação Espinozista")
+    parser.add_argument("-i", "--interativo", nargs="?", const=0, type=int,
+                        help="Modo interativo (arg opcional: ticks iniciais)")
+    parser.add_argument("--llm", action="store_true", default=False,
+                        help="Usar LLM (Ollama) para controlar personagem marcado")
+    parser.add_argument("--provider", choices=["ollama", "llamacpp"], default=None,
+                        help="Provedor LLM (padrão: ollama)")
+    parser.add_argument("--model", type=str, default=None,
+                        help="Modelo (ex: qwen2.5:0.5b, padrão: qwen2.5:1.5b)")
+    parser.add_argument("--url", type=str, default=None,
+                        help="URL do servidor LLM (padrão: http://localhost:11434)")
     
-    if "--interativo" in sys.argv or "-i" in sys.argv:
-        # Extrair ticks iniciais opcionais (ex: -i 5)
-        ticks = 0
-        for i, arg in enumerate(sys.argv):
-            if arg in ("--interativo", "-i") and i + 1 < len(sys.argv):
-                try:
-                    ticks = int(sys.argv[i + 1])
-                except ValueError:
-                    pass
-        sim.rodar_interativo(ticks_iniciais=ticks)
+    args = parser.parse_args()
+    
+    # Configurar LLM se solicitado
+    config_llm = None
+    usar_llm = False
+    if args.llm:
+        from llm import ProviderLLM
+        usar_llm = True
+        provider = ProviderLLM.OLLAMA if args.provider in (None, "ollama") else ProviderLLM.LLAMACPP
+        config_llm = ConfigLLM(
+            provider=provider,
+            modelo=args.model or "qwen2.5:1.5b",
+            ollama_url=args.url or "http://localhost:11434",
+            llamacpp_url=args.url or "http://localhost:8080",
+        )
+    
+    sim = criar_simulacao_padrao(usar_llm=usar_llm, config_llm=config_llm)
+    
+    if args.interativo is not None:
+        sim.rodar_interativo(ticks_iniciais=args.interativo)
     else:
         sim.rodar(pausa_a_cada=2)
