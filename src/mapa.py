@@ -330,15 +330,15 @@ def criar_mapa_padrao() -> Mapa:
     Cria o mapa padrão da simulação
     
     Topografia:
-                   [Floresta]
-                        │
-    [Montanha] ── [Vila] ── [Planície]
-                        │
-                    [Rio]
-                        │
-                    [Praia]
-                        │
-                   [Caverna]
+                    [Floresta] ── [Lago]
+                         │
+     [Montanha] ── [Vila] ── [Planície] ── [Ruínas]
+                         │
+                     [Rio] ── [Pântano]
+                         │
+                     [Praia]
+                         │
+                    [Caverna]
     """
     mapa = Mapa()
     
@@ -505,8 +505,73 @@ def criar_mapa_padrao() -> Mapa:
         requer_ferramentas=True
     )
     
+    # =========================================================================
+    # LAGO
+    # =========================================================================
+    lago = Local(
+        id="lago",
+        nome="Lago Sereno",
+        descricao="Águas calmas cercadas por vegetação",
+        tipo=TipoLocal.RECURSO_NATURAL,
+        capacidade=4,
+        perigo=0.15,
+        conforto=0.6,
+        recursos=[
+            RecursoLocal("peixe", 0.6, 0.02),
+            RecursoLocal("água", 0.8, 0.03),
+            RecursoLocal("ervas", 0.4, 0.01),
+        ],
+        conexoes={
+            "floresta": 2,
+            "montanha": 4,
+        }
+    )
+    
+    # =========================================================================
+    # PÂNTANO
+    # =========================================================================
+    pantano = Local(
+        id="pantano",
+        nome="Pântano Sombrio",
+        descricao="Terreno alagado com névoa e plantas raras",
+        tipo=TipoLocal.PERIGOSO,
+        capacidade=3,
+        perigo=0.55,
+        conforto=0.15,
+        recursos=[
+            RecursoLocal("ervas", 0.5, 0.02),
+            RecursoLocal("cogumelos", 0.7, 0.01),
+            RecursoLocal("madeira", 0.3, 0.005),
+        ],
+        conexoes={
+            "floresta": 4,
+            "rio": 2,
+        }
+    )
+    
+    # =========================================================================
+    # RUÍNAS ANTIGAS
+    # =========================================================================
+    ruinas = Local(
+        id="ruinas",
+        nome="Ruínas Antigas",
+        descricao="Vestígios de uma civilização com materiais valiosos",
+        tipo=TipoLocal.NEUTRO,
+        capacidade=3,
+        perigo=0.35,
+        conforto=0.2,
+        recursos=[
+            RecursoLocal("pedra", 0.5, 0.005),
+            RecursoLocal("mineral", 0.5, 0.002),
+            RecursoLocal("cristais", 0.4, 0.001),
+        ],
+        conexoes={
+            "planicie": 4,
+        }
+    )
+    
     # Adicionar locais ao mapa
-    for local in [vila, floresta, montanha, planicie, rio, praia, caverna]:
+    for local in [vila, floresta, montanha, planicie, rio, praia, caverna, lago, pantano, ruinas]:
         mapa.adicionar_local(local)
     
     mapa.local_inicial = "vila"

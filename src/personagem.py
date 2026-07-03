@@ -294,7 +294,8 @@ class Personagem:
                 "recursos": [],
                 "perigo": 0.0,
                 "conhecido": local == local_inicial  # só sabe do local inicial
-            } for local in ["vila", "floresta", "montanha", "planicie", "rio", "praia", "caverna"]
+            } for local in ["vila", "floresta", "montanha", "planicie", "rio", "praia", "caverna",
+                           "lago", "pantano", "ruinas"]
         }
         
         # Habilidades e inventário
