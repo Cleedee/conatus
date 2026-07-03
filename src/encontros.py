@@ -938,6 +938,26 @@ class ProcessadorEncontros:
         """Efeito de usar oficina"""
         personagem.necessidades.energia -= 0.1
         
+        # Produzir algo útil baseado nas habilidades
+        producoes_possiveis = []
+        if personagem.get_nivel_habilidade("ferreiro") >= 0.2:
+            producoes_possiveis.append(("metal", "refinou minério em metal"))
+        if personagem.get_nivel_habilidade("artesao") >= 0.1:
+            producoes_possiveis.append(("cordas", "teceu cordas resistentes"))
+        if personagem.get_nivel_habilidade("construtor") >= 0.1:
+            producoes_possiveis.append(("pranchas", "desbastou pranchas de madeira"))
+        
+        if not producoes_possiveis:
+            producoes_possiveis = [("ferramentas", "fabricou ferramentas básicas")]
+        
+        item, desc = random.choice(producoes_possiveis)
+        qtd = random.randint(1, 3)
+        
+        if item in ("cordas",):
+            personagem.inventario.adicionar_item(item, qtd)
+        else:
+            personagem.inventario.adicionar_material(item, qtd)
+        
         resultado = ResultadoEncontro.ADEQUACAO
         delta = 0.2
         
@@ -946,8 +966,8 @@ class ProcessadorEncontros:
             resultado=resultado,
             delta_potencia=delta,
             sucesso=True,
-            ganho_recurso=None,
-            detalhes="Trabalhou na oficina e produziu ferramentas"
+            ganho_recurso=item,
+            detalhes=f"Trabalhou na oficina e {desc} (+{qtd} {item})"
         )
 
 
