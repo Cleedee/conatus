@@ -319,6 +319,11 @@ class Simulacao:
         # Estado
         self.estado = EstadoMundo()
         
+        # Alternância de personagem LLM
+        self._alternancia_intervalo: int = 0  # 0 = revezamento desligado
+        self._alternancia_prox_tick: int = 0
+        self._indice_llm_atual: int = 0
+
         # Callback para display
         self.callback_display = callback_display or self._display_padrao
     
@@ -632,6 +637,20 @@ class Simulacao:
                 print(f"   ⚠ LLM falhou para {p.nome}: {e}")
             break  # Só dispara um por tick
 
+    def _alternar_personagem_llm(self):
+        """Alterna o personagem controlado por LLM para o próximo"""
+        if not self.personagens or self._alternancia_intervalo <= 0:
+            return
+        # Desmarcar todos
+        for p in self.personagens:
+            p.controlado_por_llm = False
+        # Encontrar índice do próximo
+        self._indice_llm_atual = (self._indice_llm_atual + 1) % len(self.personagens)
+        prox = self.personagens[self._indice_llm_atual]
+        prox.controlado_por_llm = True
+        self._alternancia_prox_tick = self.estado.tick_atual + self._alternancia_intervalo
+        print(f"   🔄 LLM agora controla {prox.nome} (próxima troca em {self._alternancia_intervalo} ticks)")
+
     def _consultar_llm_sincrono(self) -> Optional[dict]:
         """
         Consulta LLM de forma síncrona (bloqueante) para o personagem
@@ -639,6 +658,10 @@ class Simulacao:
         """
         if not self.agente_llm or not self.agente_llm.verificar_pronto():
             return None
+
+        # Alternar personagem quando atingir o tick marcado
+        if self._alternancia_intervalo > 0 and self.estado.tick_atual >= self._alternancia_prox_tick:
+            self._alternar_personagem_llm()
 
         # Encontrar personagem LLM que pode agir
         personagem = None
@@ -1693,6 +1716,8 @@ if __name__ == "__main__":
                         help="Modelo (ex: qwen2.5:0.5b, padrão: qwen2.5:1.5b)")
     parser.add_argument("--url", type=str, default=None,
                         help="URL do servidor LLM (padrão: http://localhost:11434)")
+    parser.add_argument("--alternar", type=int, default=0,
+                        help="Alternar LLM entre personagens a cada N ticks (padrão: 0 = desligado)")
     
     args = parser.parse_args()
     
@@ -1712,11 +1737,15 @@ if __name__ == "__main__":
     
     sim = criar_simulacao_padrao(usar_llm=usar_llm, config_llm=config_llm)
     
+    # Configurar alternância de personagem LLM
+    if args.llm and args.alternar > 0:
+        sim._alternancia_intervalo = args.alternar
+        # Primeira alternância após N ticks (tick 0 não conta — primeiro tick é 1)
+        sim._alternancia_prox_tick = args.alternar + 1
+    
     if args.interativo is not None:
         sim.rodar_interativo(ticks_iniciais=args.interativo)
     elif args.llm:
-        # LLM: roda sem pausas — cada tick espera o LLM responder
         sim.rodar()
     else:
-        # Sem LLM: 50 ticks e encerra
         sim.rodar(ticks=50, pausa_a_cada=None)
