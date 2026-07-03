@@ -397,7 +397,8 @@ class Simulacao:
         
         # 4. PROCESSAR CADA PERSONAGEM
         for personagem in self.personagens:
-            predef = decisoes_llm.get(personagem.id)
+            # Só usa decisão LLM se o personagem for controlado por LLM
+            predef = decisoes_llm.get(personagem.id) if personagem.controlado_por_llm else None
             resultado_personagem = self._processar_personagem(
                 personagem,
                 encontro_escolhido=predef.get("encontro") if predef else None,
@@ -576,13 +577,15 @@ class Simulacao:
         if not self.agente_llm or not self.agente_llm.verificar_pronto():
             return
         
-        # Escolher próximo personagem (round-robin)
+        # Escolher próximo personagem (round-robin, apenas controlados por LLM)
         n = len(self.personagens)
         for _ in range(n):
             p = self.personagens[self._prox_personagem_idx]
             self._prox_personagem_idx = (self._prox_personagem_idx + 1) % n
             
-            # Pular personagens inativos
+            # Pular personagens sem LLM, inativos ou com futuro pendente
+            if not p.controlado_por_llm:
+                continue
             if not p.pode_interagir or p.dormindo or p.estado == EstadoPersonagem.LOCOMOVENDO:
                 continue
             
@@ -1443,10 +1446,10 @@ class Simulacao:
             linhas.append(f"👥 {len(self.personagens)} personagens:")
             for p in self.personagens:
                 estado = "💤" if p.dormindo else "🚶" if p.estado == EstadoPersonagem.LOCOMOVENDO else "🧑"
-                # Habilidades a partir de Capaz (>= 0.4)
+                llm_ico = "🤖 " if p.controlado_por_llm else ""
                 skills = [nome for nome, hab in p.habilidades.items() if hab.nivel >= 0.4]
                 sufixo_skills = f" [{', '.join(skills)}]" if skills else ""
-                linhas.append(f"   {estado} {p.nome} em {p.local_atual} (potência: {p.potencia_atual:.0%}){sufixo_skills}")
+                linhas.append(f"   {estado} {llm_ico}{p.nome} em {p.local_atual} (potência: {p.potencia_atual:.0%}){sufixo_skills}")
         
         # Eventos
         if self.estado.eventos_ativos:
@@ -1657,9 +1660,10 @@ class Simulacao:
                     print(f"\n   👥 Aqui estão:")
                     for p in aqui:
                         estado = "💤" if p.dormindo else "🚶" if p.estado == EstadoPersonagem.LOCOMOVENDO else "🧑"
+                        llm_ico = "🤖" if p.controlado_por_llm else ""
                         skills = [nome for nome, hab in p.habilidades.items() if hab.nivel >= 0.4]
                         sufixo = f" [{', '.join(skills)}]" if skills else ""
-                        print(f"      {estado} {p.nome} ({p.personalidade.arquetipo}) — potência: {p.potencia_atual:.0%}{sufixo}")
+                        print(f"      {estado} {llm_ico} {p.nome} ({p.personalidade.arquetipo}) — potência: {p.potencia_atual:.0%}{sufixo}")
             
             def do_quem(self, arg):
                 """quem [local] — lista personagens. Se local for dado, filtra por local."""
@@ -1676,9 +1680,10 @@ class Simulacao:
                     print(f"\n   👥 Em {local.nome}:")
                     for p in personagens:
                         estado = "💤" if p.dormindo else "🚶" if p.estado == EstadoPersonagem.LOCOMOVENDO else "🧑"
+                        llm_ico = "🤖" if p.controlado_por_llm else ""
                         skills = [nome for nome, hab in p.habilidades.items() if hab.nivel >= 0.4]
                         sufixo = f" [{', '.join(skills)}]" if skills else ""
-                        print(f"      {estado} {p.nome} ({p.personalidade.arquetipo}) — {self._formatar_necessidades(p)}{sufixo}")
+                        print(f"      {estado} {llm_ico} {p.nome} ({p.personalidade.arquetipo}) — {self._formatar_necessidades(p)}{sufixo}")
                 else:
                     print(f"\n   👥 Personagens ({len(self.sim.personagens)}):")
                     # Agrupar por local
@@ -1693,9 +1698,10 @@ class Simulacao:
                         print(f"\n      📍 {nome_local}:")
                         for p in ps:
                             estado = "💤" if p.dormindo else "🚶" if p.estado == EstadoPersonagem.LOCOMOVENDO else "🧑"
+                            llm_ico = "🤖" if p.controlado_por_llm else ""
                             skills = [nome for nome, hab in p.habilidades.items() if hab.nivel >= 0.4]
                             sufixo = f" [{', '.join(skills)}]" if skills else ""
-                            print(f"         {estado} {p.nome} ({p.personalidade.arquetipo}) — potência: {p.potencia_atual:.0%}{sufixo}")
+                            print(f"         {estado} {llm_ico} {p.nome} ({p.personalidade.arquetipo}) — potência: {p.potencia_atual:.0%}{sufixo}")
             
             def do_personagem(self, arg):
                 """personagem <nome> — ficha completa do personagem"""
@@ -1975,7 +1981,9 @@ def criar_simulacao_padrao() -> Simulacao:
             "reputacao": 0.7
         }
     )
-    personagens.append(Personagem(maria, local_inicial="vila"))
+    p_maria = Personagem(maria, local_inicial="vila")
+    p_maria.controlado_por_llm = True
+    personagens.append(p_maria)
     
     # João - Prudente
     joao = Personalidade(

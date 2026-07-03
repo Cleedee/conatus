@@ -326,6 +326,9 @@ class Personagem:
         self.total_encontros_positivos = 0
         self.total_encontros_negativos = 0
         
+        # LLM
+        self.controlado_por_llm: bool = False
+        
         # Timestamp
         self.criado_em = datetime.now().isoformat()
     
