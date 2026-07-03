@@ -65,7 +65,7 @@ Baseado na **Ética de Spinoza** (1677):
 
 ```bash
 # Via git
-git clone https://github.com/seu-usuario/conatus.git
+git clone https://github.com/Cleedee/conatus.git
 cd conatus
 
 # (recomendado) Ambiente virtual
@@ -375,5 +375,5 @@ Verificar se emergem naturalmente:
 ---
 
 <p align="center">
-  <sub>Feito com ☕ e 🐍 — <a href="https://github.com/seu-usuario/conatus">Conatus</a> · MIT License</sub>
+  <sub>Feito com ☕ e 🐍 — <a href="https://github.com/Cleedee/conatus">Conatus</a> · MIT License</sub>
 </p>
