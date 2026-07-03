@@ -151,41 +151,47 @@ class MemoriaEncontro:
 
 @dataclass
 class Relacao:
-    """Relação com outro personagem"""
+    """Relação com qualquer entidade (personagem, local, item, atividade, clima)"""
     afeto: float = 0.0           # positivo = carinho, negativo = aversão
     confianca: float = 0.5       # 0 = desconfiança total, 1 = confiança cega
-    compreensao: float = 0.0     # quanto entende o outro
     encontros_positivos: int = 0
     encontros_negativos: int = 0
     ultimo_encontro: float = 0.0
     historico: list[str] = field(default_factory=list)
+    tipo: str = "personagem"     # personagem, local, item, atividade, clima
+    entidade_nome: str = ""      # nome legível para display
     
     def registrar_encontro(self, positivo: bool, descricao: str):
         """Registra um encontro na relação"""
         if positivo:
             self.encontros_positivos += 1
             self.afeto += 0.1
-            self.confianca += 0.05
         else:
             self.encontros_negativos += 1
             self.afeto -= 0.15
-            self.confianca -= 0.1
         
-        # Normalizar
         self.afeto = max(-1.0, min(1.0, self.afeto))
-        self.confianca = max(0.0, min(1.0, self.confianca))
-        
-        # Registrar no histórico (últimos 10)
         self.historico.append(descricao)
         if len(self.historico) > 10:
             self.historico.pop(0)
     
     def get_modificador(self) -> float:
-        """
-        Retorna modificador baseado na relação
-        Positivo = bônus em interações, Negativo = penalidade
-        """
+        """Retorna modificador baseado na relação"""
         return (self.afeto + self.confianca) / 2
+
+    @property
+    def sentimento(self) -> str:
+        """Descrição textual do sentimento"""
+        if self.afeto > 0.5:
+            return "adora" if self.tipo in ("local", "item", "atividade", "clima") else "ama"
+        elif self.afeto > 0.1:
+            return "gosta"
+        elif self.afeto > -0.1:
+            return "indiferente"
+        elif self.afeto > -0.5:
+            return "desgosta"
+        else:
+            return "odeia"
 
 
 @dataclass
@@ -298,8 +304,18 @@ class Personagem:
         # Habilidades iniciais baseadas no arquétipo
         self._init_habilidades_iniciais()
         
-        # Relações
+        # Relações (chave: "tipo:id", ex: "personagem:joao", "local:floresta")
         self.relacoes: dict[str, Relacao] = {}
+        
+        # Ferramentas equipadas (itens craftados que estão em uso)
+        self.ferramentas_equipadas: list[str] = []
+        
+        # Histórico de crafting
+        self.historico_crafting: list[dict] = []
+        
+        # Moradia
+        self.moradia_local: str = local_inicial
+        self.tem_moradia: bool = True
         
         # Contadores
         self.total_encontros = 0
@@ -426,11 +442,15 @@ class Personagem:
     
     def adicionar_item(self, nome: str, quantidade: int = 1, qualidade: float = 1.0):
         """Adiciona item ao inventário"""
-        if nome in ["madeira", "pedra", "mineral", "ervas", "comida", 
+        if nome in ["madeira", "pedra", "mineral", "ervas", "comida",
                      "água", "cogumelos", "ferro", "cristais"]:
             self.inventario.adicionar_material(nome, quantidade, qualidade)
         else:
             self.inventario.adicionar_item(nome, quantidade)
+            # Auto-equipar ferramentas
+            if nome in ("machado", "picareta", "vara_pesca", "fogueira"):
+                if nome not in self.ferramentas_equipadas:
+                    self.ferramentas_equipadas.append(nome)
     
     def remover_item(self, nome: str, quantidade: int = 1) -> bool:
         """Remove item do inventário"""
@@ -447,6 +467,23 @@ class Personagem:
         """Verifica se tem item"""
         return (self.inventario.tem_material(nome, quantidade) or 
                 self.inventario.get_quantidade_itens(nome) >= quantidade)
+    
+    def usar_item(self, nome: str) -> str:
+        """Usa um item consumível (medicina) — retorna descrição do efeito"""
+        EFEITOS_MEDICINA = {
+            "bandagem": {"saude": 0.15, "descricao": "Aplicou bandagem no ferimento"},
+            "po_cura": {"saude": 0.30, "descricao": "Usou pó de cura cicatrizante"},
+            "remedio": {"saude": 0.50, "descricao": "Tomou remédio fortificante"},
+        }
+        efeito = EFEITOS_MEDICINA.get(nome)
+        if not efeito:
+            return f"Não sabe como usar {nome}"
+        if not self.tem_item(nome):
+            return f"Não tem {nome}"
+        self.remover_item(nome)
+        self.necessidades.saude = min(1.0, self.necessidades.saude + efeito["saude"])
+        self.potencia_atual = min(self.potencia_max, self.potencia_atual + efeito["saude"] * 0.3)
+        return efeito["descricao"]
     
     # =========================================================================
     # PROPRIEDADES CALCULADAS
@@ -477,7 +514,8 @@ class Personagem:
         """Personagem pode participar de encontros"""
         return self.estado in [
             EstadoPersonagem.ATIVO,
-            EstadoPersonagem.ESPERANDO
+            EstadoPersonagem.ESPERANDO,
+            EstadoPersonagem.FERIDO
         ]
     
     # =========================================================================
@@ -604,6 +642,11 @@ class Personagem:
             }
         )
         
+        # Atualizar relações com local e atividade
+        self.atualizar_relacao_apos_encontro(
+            tipo, objeto, local, resultado, delta, descricao
+        )
+        
         # Armazenar na memória de trabalho
         self.memoria_trabalho.append(memoria)
         if len(self.memoria_trabalho) > 10:
@@ -625,30 +668,75 @@ class Personagem:
     # SISTEMA DE RELAÇÕES
     # =========================================================================
     
-    def get_ou_criar_relacao(self, outro_id: str) -> Relacao:
-        """Retorna relação com outro personagem, criando se necessário"""
-        if outro_id not in self.relacoes:
-            self.relacoes[outro_id] = Relacao()
-        return self.relacoes[outro_id]
+    @staticmethod
+    def _chave_relacao(tipo: str, entidade_id: str) -> str:
+        """Gera chave padronizada para o dict de relações"""
+        return f"{tipo}:{entidade_id}"
+
+    def get_ou_criar_relacao(
+        self, entidade_id: str,
+        tipo: str = "personagem",
+        entidade_nome: str = ""
+    ) -> Relacao:
+        """Retorna relação com qualquer entidade, criando se necessário"""
+        chave = self._chave_relacao(tipo, entidade_id)
+        if chave not in self.relacoes:
+            self.relacoes[chave] = Relacao(
+                tipo=tipo,
+                entidade_nome=entidade_nome or entidade_id
+            )
+        return self.relacoes[chave]
     
-    def registrar_encontro_social(
+    def registrar_encontro_relacional(
         self,
-        outro: Personagem,
+        entidade_id: str,
+        tipo: str,
         positivo: bool,
+        descricao: str,
+        entidade_nome: str = ""
+    ):
+        """Registra encontro na relação com qualquer entidade"""
+        relacao = self.get_ou_criar_relacao(entidade_id, tipo, entidade_nome)
+        relacao.registrar_encontro(positivo, descricao)
+    
+    def get_modificador_relacao(self, entidade_id: str, tipo: str = "personagem") -> float:
+        """Retorna modificador baseado na relação"""
+        chave = self._chave_relacao(tipo, entidade_id)
+        if chave in self.relacoes:
+            return self.relacoes[chave].get_modificador()
+        return 0.0  # neutro para desconhecidos
+    
+    def atualizar_relacao_apos_encontro(
+        self,
+        tipo: TipoEncontro,
+        objeto: str,
+        local_id: str,
+        resultado: ResultadoEncontro,
+        delta: float,
         descricao: str
     ):
-        """Registra encontro social na relação"""
-        relacao = self.get_ou_criar_relacao(outro.id)
-        relacao.registrar_encontro(positivo, descricao)
+        """Atualiza relações com local e atividade após um encontro"""
+        positivo = resultado != ResultadoEncontro.DISSOLUCAO
         
-        # Aumentar compreensão gradualmente
-        relacao.compreensao = min(1.0, relacao.compreensao + 0.02)
-    
-    def get_modificador_relacao(self, outro_id: str) -> float:
-        """Retorna modificador baseado na relação"""
-        if outro_id in self.relacoes:
-            return self.relacoes[outro_id].get_modificador()
-        return 0.0  # neutro para desconhecidos
+        # Relação com o local
+        self.registrar_encontro_relacional(
+            local_id, "local", positivo,
+            descricao, entidade_nome=local_id
+        )
+        
+        # Relação com a atividade baseada no tipo do encontro
+        mapa_atividade = {
+            TipoEncontro.RECURSO: objeto,
+            TipoEncontro.FISICO: objeto,
+            TipoEncontro.SOCIAL: "socializar",
+            TipoEncontro.COGNITIVO: "refletir",
+            TipoEncontro.AMBIENTAL: "explorar",
+        }
+        atividade = mapa_atividade.get(tipo, "agir")
+        self.registrar_encontro_relacional(
+            atividade, "atividade", positivo,
+            descricao, entidade_nome=atividade
+        )
     
     # =========================================================================
     # SISTEMA DE MEMÓRIA
@@ -704,19 +792,24 @@ Foque em: quem você conhece, o que aprendeu, o que causou alegria/tristeza.
             for r in self.memoria_semantica:
                 partes.append(f"  - {r}")
         
-        # Relações importantes
+        # Relações importantes (qualquer entidade)
         relacoes_importantes = [
             (rid, r) for rid, r in self.relacoes.items()
-            if abs(r.afeto) > 0.3 or r.encontros_positivos + r.encontros_negativos > 3
+            if abs(r.afeto) > 0.5 or r.encontros_positivos + r.encontros_negativos > 3
         ]
         
         if relacoes_importantes:
-            partes.append("RELACIONAMENTOS:")
+            partes.append("RELAÇÕES:")
             for rid, r in relacoes_importantes:
-                if r.afeto > 0.3:
-                    partes.append(f"  - {rid}: gosto desta pessoa")
-                elif r.afeto < -0.3:
-                    partes.append(f"  - {rid}: desconfio/evito")
+                nome = r.entidade_nome or rid.split(":", 1)[-1]
+                if r.tipo == "personagem":
+                    if r.afeto > 0.3:
+                        partes.append(f"  - {nome}: gosto")
+                    elif r.afeto < -0.3:
+                        partes.append(f"  - {nome}: evito")
+                else:
+                    emoji = "gosta" if r.afeto > 0 else "não gosta"
+                    partes.append(f"  - {nome} ({r.tipo}): {emoji}")
         
         return "\n".join(partes) if partes else "Nenhuma memória relevante."
     
@@ -724,6 +817,36 @@ Foque em: quem você conhece, o que aprendeu, o que causou alegria/tristeza.
     # MECÂNICAS DE ESTADO
     # =========================================================================
     
+    def aplicar_clima_local(self, clima: str):
+        """
+        Aplica efeitos do clima nas necessidades e atualiza relação emocional.
+        Chamado por mundo.py com o clima do local atual.
+        """
+        efeitos = {
+            "normal": {},
+            "chuva": {"abrigo": -0.02},
+            "seca": {"sede": -0.03},
+            "tempestade": {"abrigo": -0.04, "energia": -0.02},
+            "neve": {"energia": -0.03, "abrigo": -0.03},
+            "calor_extremo": {"sede": -0.04, "energia": -0.01},
+        }
+        efeito = efeitos.get(clima, {})
+        if not efeito:
+            return
+        
+        for nec, delta in efeito.items():
+            atual = getattr(self.necessidades, nec, None)
+            if atual is not None:
+                setattr(self.necessidades, nec, max(0.0, atual + delta))
+        
+        # Atualizar relação com o clima (exposição prolongada gera aversão)
+        if clima != "normal":
+            self.registrar_encontro_relacional(
+                clima, "clima", False,
+                f"Exposto a clima {clima}",
+                entidade_nome=clima
+            )
+
     def tick_necessidades(self):
         """
         Atualiza necessidades a cada tick
@@ -734,12 +857,50 @@ Foque em: quem você conhece, o que aprendeu, o que causou alegria/tristeza.
         self.necessidades.fome -= 0.005
         self.necessidades.sede -= 0.008
         
+        # Abrigo: se não está na própria moradia, perde abrigo mais rápido
+        if self.tem_moradia and self.local_atual == self.moradia_local:
+            self.necessidades.abrigo += 0.01  # recupera em casa
+        else:
+            self.necessidades.abrigo -= 0.015  # exposto
+        
         # Se dormindo, recupera energia
         if self.dormindo:
             self.necessidades.energia += 0.05
         
+        # Processar perecibilidade do inventário
+        estragados = self.inventario.tick_validade()
+        if estragados:
+            self.memoria_trabalho.append(MemoriaEncontro(
+                id=f"estragou_{len(self.memoria_trabalho)}",
+                timestamp=0,
+                tipo=TipoEncontro.AMBIENTAL,
+                agente="natureza",
+                descricao=f"Algo estragou no inventário: {', '.join(estragados)}",
+                resultado=ResultadoEncontro.DISSOLUCAO,
+                delta_potencia=-0.05,
+                local=self.local_atual
+            ))
+            # Comida estragada reduz saúde
+            self.necessidades.saude -= 0.03 * len(estragados)
+        
+        # Decaimento de saúde por necessidades críticas
+        if self.necessidades.fome < 0.2:
+            self.necessidades.saude -= 0.005
+        if self.necessidades.sede < 0.2:
+            self.necessidades.saude -= 0.005
+        if self.necessidades.abrigo < 0.2:
+            self.necessidades.saude -= 0.002
+        if self.necessidades.energia < 0.2:
+            self.necessidades.saude -= 0.003
+        
         # Normalizar
         self.necessidades.normalizar()
+        
+        # Reflexo no estado do personagem
+        if self.necessidades.saude < 0.3:
+            self.estado = EstadoPersonagem.FERIDO
+        elif self.estado == EstadoPersonagem.FERIDO and self.necessidades.saude > 0.5:
+            self.estado = EstadoPersonagem.ATIVO
         
         # Efeito das necessidades na potência
         media_necessidades = self.necessidades.media()

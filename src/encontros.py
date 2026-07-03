@@ -69,6 +69,7 @@ class EncontroDisponivel:
     requer_hora: Optional[tuple[int, int]] = None  # (min, max)
     requer_estado: Optional[EstadoPersonagem] = None
     requer_necessidade: Optional[tuple[str, float]] = None  # (necessidade, max_value)
+    requer_ferramenta: Optional[str] = None
     
     # Consequências pré-definidas (podem ser modificadas)
     resultado_sugerido: Optional[ResultadoEncontro] = None
@@ -96,6 +97,17 @@ class ResultadoEncontroProcessado:
     perda_recurso: Optional[str] = None
     ganho_recurso: Optional[str] = None
     mudanca_estado: Optional[EstadoPersonagem] = None
+    
+    # Consumo de recurso local (nome da quantidade no mapa)
+    recurso_consumido: Optional[str] = None
+    recurso_quantidade: float = 0.0
+    
+    # Depósito (colocar recurso de volta no local)
+    recurso_depositado: Optional[str] = None
+    recurso_depositado_qtd: float = 0.0
+    
+    # Dano à saúde (causado por perigo, ferimentos, etc.)
+    dano_saude: float = 0.0
     
     # Para logging
     detalhes: str = ""
@@ -388,7 +400,8 @@ class GeradorEncontros:
                 disponibilidade=DisponibilidadeEncontro.SEMPRE,
                 requer_local=local,
                 resultado_sugerido=template.get("resultado_sugerido"),
-                tag=template.get("tag", "")
+                tag=template.get("tag", ""),
+                requer_ferramenta=template.get("requer_ferramenta")
             )
             
             encontros.append(encontro)
@@ -567,24 +580,17 @@ class GeradorEncontros:
             if not (min_hora <= hora <= max_hora):
                 return False
         
-        # Verificar necessidade
+        # Verificar necessidade (valor mínimo necessário)
         if "requer_necessidade" in template:
-            nec_nome, nec_max = template["requer_necessidade"]
+            nec_nome, nec_min = template["requer_necessidade"]
             nec_atual = getattr(personagem.necessidades, nec_nome, None)
-            if nec_atual is not None and nec_atual > nec_max:
+            if nec_atual is not None and nec_atual < nec_min:
                 return False
         
         # Verificar estado
         if "requer_estado" in template:
             if personagem.estado != template["requer_estado"]:
                 return False
-        
-        # Verificar ferramenta
-        if "requer_ferramenta" in template:
-            ferramenta = template["requer_ferramenta"]
-            if not personagem.tem_item(ferramenta):
-                # Pode tentar sem ferramenta, mas com penalidade
-                pass  # Não bloquear, mas reduzir intensidade
         
         return True
 
@@ -626,6 +632,32 @@ class ProcessadorEncontros:
         # Processamento genérico
         return self._processar_generico(personagem, encontro)
     
+    RECURSOS_COLETAVEIS: dict[str, tuple[str, int]] = {
+        "pedra": ("pedra", 2),
+        "mineral": ("mineral", 1),
+        "colheita": ("colheita", 3),
+        "ervas_medicinais": ("ervas", 2),
+        "marisco": ("comida", 2),
+        "agua_fresca": ("água", 2),
+        "cogumelos": ("cogumelos", 2),
+    }
+    
+    # Mapeamento objeto_encontro → nome_recurso_local (para consumir do mapa)
+    OBJETO_PARA_RECURSO: dict[str, str] = {
+        "comida_comun": "comida",
+        "poço": "água",
+        "madeira": "madeira",
+        "caça": "caça",
+        "peixe": "peixe",
+        "pedra": "pedra",
+        "mineral": "mineral",
+        "colheita": "colheita",
+        "ervas_medicinais": "ervas",
+        "marisco": "comida",
+        "agua_fresca": "água",
+        "cogumelos": "cogumelos",
+    }
+
     def _processar_generico(
         self,
         personagem: Personagem,
@@ -658,6 +690,29 @@ class ProcessadorEncontros:
             intensidade_modificada *= 0.5  # Metade da eficiência
             detalhe_extra = f" (sem {ferramenta_requerida})"
         
+        # Dano à saúde se for encontro perigoso
+        dano_saude = 0.0
+        if resultado == ResultadoEncontro.DISSOLUCAO and (
+            encontro.tag == "risco" or "perigo" in encontro.objeto
+        ):
+            dano_saude = encontro.intensidade * 0.15
+        
+        # Adicionar recurso ao inventário se for coleta
+        ganho = None
+        recurso_consumido = None
+        recurso_qtd = 0.0
+        
+        if encontro.objeto in self.RECURSOS_COLETAVEIS:
+            mat_nome, mat_qtd = self.RECURSOS_COLETAVEIS[encontro.objeto]
+            personagem.inventario.adicionar_material(mat_nome, mat_qtd, qualidade=1.0)
+            ganho = mat_nome
+            
+            # Marcar consumo de recurso local
+            rec_nome = self.OBJETO_PARA_RECURSO.get(encontro.objeto)
+            if rec_nome:
+                recurso_consumido = rec_nome
+                recurso_qtd = mat_qtd * 0.1  # 0.1 por unidade coletada
+        
         # Calcular delta
         delta, _ = personagem.calcular_delta_encontro(
             tipo=encontro.tipo,
@@ -671,7 +726,11 @@ class ProcessadorEncontros:
             resultado=resultado,
             delta_potencia=delta,
             sucesso=resultado != ResultadoEncontro.DISSOLUCAO,
-            detalhes=f"Encontro genérico: {encontro.descricao}{detalhe_extra}"
+            ganho_recurso=ganho,
+            recurso_consumido=recurso_consumido,
+            recurso_quantidade=recurso_qtd,
+            dano_saude=dano_saude,
+            detalhes=f"{encontro.descricao}{detalhe_extra}"
         )
     
     def _efeito_comida(
@@ -679,8 +738,11 @@ class ProcessadorEncontros:
         personagem: Personagem,
         encontro: EncontroDisponivel
     ) -> ResultadoEncontroProcessado:
-        """Efeito de comer"""
+        """Efeito de pegar/comer comida"""
         antes_fome = personagem.necessidades.fome
+        
+        # Pegar comida do depósito comum (consome recurso local)
+        personagem.inventario.adicionar_material("comida", 1, qualidade=1.0)
         
         # Restaurar fome
         restauracao = min(0.3, 1.0 - personagem.necessidades.fome)
@@ -700,7 +762,9 @@ class ProcessadorEncontros:
             delta_potencia=delta,
             sucesso=True,
             ganho_recurso="comida",
-            detalhes=f"Comeu e restaurou {restauracao:.2f} de fome"
+            recurso_consumido="comida",
+            recurso_quantidade=0.15,
+            detalhes=f"Pegou comida do depósito e comeu"
         )
     
     def _efeito_agua(
@@ -708,8 +772,11 @@ class ProcessadorEncontros:
         personagem: Personagem,
         encontro: EncontroDisponivel
     ) -> ResultadoEncontroProcessado:
-        """Efeito de beber água"""
+        """Efeito de buscar/beber água"""
         antes_sede = personagem.necessidades.sede
+        
+        # Pegar água
+        personagem.inventario.adicionar_material("água", 1, qualidade=1.0)
         
         restauracao = min(0.35, 1.0 - personagem.necessidades.sede)
         personagem.necessidades.sede += restauracao
@@ -727,25 +794,45 @@ class ProcessadorEncontros:
             delta_potencia=delta,
             sucesso=True,
             ganho_recurso="água",
-            detalhes=f"Bebeu e restaurou {restauracao:.2f} de sede"
+            recurso_consumido="água",
+            recurso_quantidade=0.1,
+            detalhes=f"Pegou água e bebeu"
         )
     
+    def _checar_ferramenta(self, encontro: EncontroDisponivel, personagem: Personagem) -> tuple[bool, str]:
+        """Verifica se personagem tem ferramenta necessária para o encontro"""
+        ferramenta = encontro.requer_ferramenta
+        if not ferramenta:
+            return True, ""
+        if personagem.tem_item(ferramenta):
+            return True, f" usando {ferramenta}"
+        return False, f" (sem {ferramenta})"
+
     def _efeito_madeira(
         self,
         personagem: Personagem,
         encontro: EncontroDisponivel
     ) -> ResultadoEncontroProcessado:
         """Efeito de cortar madeira"""
-        # Consome energia
+        tem_ferr, ferr_texto = self._checar_ferramenta(encontro, personagem)
         personagem.necessidades.energia -= 0.15
         
-        # Chance de sucesso baseada em energia
-        if personagem.necessidades.energia > 0.4:
+        # Chance de sucesso baseada em energia e ferramenta
+        if personagem.necessidades.energia > 0.4 and tem_ferr:
             sucesso = True
             resultado = ResultadoEncontro.ADEQUACAO
             delta = 0.2
             ganho = "madeira"
-            detalhes = "Cortou madeira com sucesso"
+            qtd = 2 if tem_ferr else 1
+            personagem.inventario.adicionar_material("madeira", qtd, qualidade=1.0)
+            detalhes = f"Cortou madeira{ferr_texto} (+{qtd} madeira)"
+        elif personagem.necessidades.energia > 0.4:
+            sucesso = True
+            resultado = ResultadoEncontro.NEUTRO
+            delta = 0.05
+            ganho = "madeira"
+            personagem.inventario.adicionar_material("madeira", 1, qualidade=1.0)
+            detalhes = f"Cortou madeira{ferr_texto} (+1 madeira)"
         else:
             sucesso = False
             resultado = ResultadoEncontro.DISSOLUCAO
@@ -753,12 +840,17 @@ class ProcessadorEncontros:
             ganho = None
             detalhes = "Cansado demais para cortar madeira"
         
+        recurso_consumido = "madeira" if sucesso else None
+        recurso_qtd = 0.2 if sucesso else 0.0
+        
         return ResultadoEncontroProcessado(
             encontro=encontro,
             resultado=resultado,
             delta_potencia=delta,
             sucesso=sucesso,
             ganho_recurso=ganho,
+            recurso_consumido=recurso_consumido,
+            recurso_quantidade=recurso_qtd,
             detalhes=detalhes
         )
     
@@ -777,12 +869,16 @@ class ProcessadorEncontros:
             resultado = ResultadoEncontro.ADEQUACAO
             delta = 0.35
             ganho = "comida"
-            detalhes = "Caça bem-sucedida!"
+            personagem.inventario.adicionar_material("comida", 3, qualidade=1.0)
+            detalhes = "Caça bem-sucedida! (+3 comida)"
         else:
             resultado = ResultadoEncontro.DISSOLUCAO
             delta = -0.1
             ganho = None
             detalhes = "A caça escapou"
+        
+        recurso_consumido = "caça" if sucesso else None
+        recurso_qtd = 0.3 if sucesso else 0.0
         
         return ResultadoEncontroProcessado(
             encontro=encontro,
@@ -790,6 +886,8 @@ class ProcessadorEncontros:
             delta_potencia=delta,
             sucesso=sucesso,
             ganho_recurso=ganho,
+            recurso_consumido=recurso_consumido,
+            recurso_quantidade=recurso_qtd,
             detalhes=detalhes
         )
     
@@ -799,18 +897,27 @@ class ProcessadorEncontros:
         encontro: EncontroDisponivel
     ) -> ResultadoEncontroProcessado:
         """Efeito de pescar"""
+        tem_ferr, ferr_texto = self._checar_ferramenta(encontro, personagem)
         personagem.necessidades.energia -= 0.1
         
-        sucesso = random.random() < 0.7  # 70% de chance
+        chance = 0.8 if tem_ferr else 0.4
+        sucesso = random.random() < chance
         
         if sucesso:
             resultado = ResultadoEncontro.ADEQUACAO
             delta = 0.25
             ganho = "comida"
+            qtd = 3 if tem_ferr else 1
+            personagem.inventario.adicionar_material("comida", qtd, qualidade=1.0)
+            detalhes = f"Pescou{ferr_texto} (+{qtd} comida)"
         else:
             resultado = ResultadoEncontro.NEUTRO
             delta = -0.05
             ganho = None
+            detalhes = "Nada mordeu a isca"
+        
+        recurso_consumido = "peixe" if sucesso else None
+        recurso_qtd = 0.2 if sucesso else 0.0
         
         return ResultadoEncontroProcessado(
             encontro=encontro,
@@ -818,7 +925,9 @@ class ProcessadorEncontros:
             delta_potencia=delta,
             sucesso=sucesso,
             ganho_recurso=ganho,
-            detalhes="Pescou um peixe" if sucesso else "Nada mordiu a isca"
+            recurso_consumido=recurso_consumido,
+            recurso_quantidade=recurso_qtd,
+            detalhes=detalhes
         )
     
     def _efeito_oficina(
@@ -829,7 +938,6 @@ class ProcessadorEncontros:
         """Efeito de usar oficina"""
         personagem.necessidades.energia -= 0.1
         
-        # Oficina sempre é produtiva
         resultado = ResultadoEncontro.ADEQUACAO
         delta = 0.2
         
@@ -838,8 +946,8 @@ class ProcessadorEncontros:
             resultado=resultado,
             delta_potencia=delta,
             sucesso=True,
-            ganho_recurso="ferramentas",
-            detalhes="Trabalhou na oficina e produziu algo útil"
+            ganho_recurso=None,
+            detalhes="Trabalhou na oficina e produziu ferramentas"
         )
 
 
@@ -964,15 +1072,13 @@ class MotorEncontros:
         positivo1 = resultado1.resultado == ResultadoEncontro.ADEQUACAO
         positivo2 = resultado2.resultado == ResultadoEncontro.ADEQUACAO
         
-        personagem1.registrar_encontro_social(
-            personagem2,
-            positivo1,
-            encontro.descricao
+        personagem1.registrar_encontro_relacional(
+            personagem2.id, "personagem", positivo1,
+            encontro.descricao, personagem2.nome
         )
-        personagem2.registrar_encontro_social(
-            personagem1,
-            positivo2,
-            encontro2.descricao
+        personagem2.registrar_encontro_relacional(
+            personagem1.id, "personagem", positivo2,
+            encontro2.descricao, personagem1.nome
         )
         
         return resultado1, resultado2

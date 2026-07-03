@@ -20,6 +20,25 @@ import random
 # ENUMS
 # =============================================================================
 
+# Tabela de perecibilidade: quantos ticks cada material dura (-1 = não perece)
+TEMPOS_VALIDADE: dict[str, int] = {
+    "comida": 24,            # 1 dia (raw, estraga rápido)
+    "colheita": 36,          # 1.5 dias
+    "carne_assada": 96,      # 4 dias
+    "sopa": 72,              # 3 dias
+    "pao": 120,              # 5 dias
+    "refeicao": 48,          # 2 dias
+    "carne_defumada": 500,   # ~20 dias
+    "molho": 96,             # 4 dias
+    "po_cura": 200,          # ~8 dias
+    "remedio": 200,          # ~8 dias
+    "bandagem": 200,         # ~8 dias
+    "peixe": 18,             # <1 dia (fresco)
+    "caça": 18,              # <1 dia (fresco)
+    "marisco": 12,           # meio dia
+}
+
+
 class NivelHabilidade(Enum):
     """Níveis descritivos de habilidade"""
     IGNORANTE = "ignorante"      # 0.0 - 0.2
@@ -114,6 +133,11 @@ class Material:
     nome: str
     quantidade: int = 0
     qualidade: float = 1.0      # 0.5 a 1.5 (afeta resultado)
+    validade: int = -1          # ticks restantes (-1 = não perecível)
+    
+    @property
+    def perecivel(self) -> bool:
+        return self.validade >= 0
     
     @property
     def nivel_descricao(self) -> str:
@@ -796,16 +820,30 @@ class Inventario:
     
     def adicionar_material(self, nome: str, quantidade: int, qualidade: float = 1.0):
         """Adiciona material ao inventário"""
+        validade = TEMPOS_VALIDADE.get(nome, -1)
+        
         if nome in self.materiais:
-            self.materiais[nome].quantidade += quantidade
+            existente = self.materiais[nome]
+            total = existente.quantidade + quantidade
+            
             # Média ponderada de qualidade
-            total = self.materiais[nome].quantidade
-            self.materiais[nome].qualidade = (
-                (self.materiais[nome].qualidade * (total - quantidade) + 
+            existente.qualidade = (
+                (existente.qualidade * existente.quantidade +
                  qualidade * quantidade) / total
             )
+            
+            # Média ponderada de validade (só se ambos forem perecíveis)
+            if existente.validade >= 0 and validade >= 0:
+                existente.validade = (
+                    (existente.validade * existente.quantidade +
+                     validade * quantidade) / total
+                )
+            elif validade >= 0:
+                existente.validade = validade
+            
+            existente.quantidade = total
         else:
-            self.materiais[nome] = Material(nome, quantidade, qualidade)
+            self.materiais[nome] = Material(nome, quantidade, qualidade, validade)
     
     def remover_material(self, nome: str, quantidade: int) -> bool:
         """Remove material. Retorna False se não tem suficiente"""
@@ -842,18 +880,63 @@ class Inventario:
         """Retorna materiais como dict simples"""
         return {nome: mat.quantidade for nome, mat in self.materiais.items()}
     
+    def tick_validade(self) -> list[str]:
+        """
+        Processa perecibilidade: decrementa validade e remove estragados.
+        Retorna lista de materiais que estragaram.
+        """
+        estragados = []
+        remover = []
+        
+        for nome, mat in self.materiais.items():
+            if mat.validade < 0:
+                continue  # não perecível
+            
+            mat.validade -= 1
+            
+            if mat.validade <= 0:
+                estragados.append(nome)
+                remover.append(nome)
+        
+        for nome in remover:
+            del self.materiais[nome]
+        
+        return estragados
+    
+    def esta_seco(self, nome: str) -> bool:
+        """
+        Verifica se um material perecível ainda está fresco (validade > 25% do total).
+        Materiais não perecíveis sempre retornam True.
+        """
+        if nome not in self.materiais:
+            return False
+        mat = self.materiais[nome]
+        if mat.validade < 0:
+            return True
+        total = TEMPOS_VALIDADE.get(nome, 24)
+        return mat.validade > total * 0.25
+    
     def descricao(self) -> str:
         """Descrição do inventário"""
         linhas = []
         
         if self.materiais:
             linhas.append("📦 Materiais:")
-            for nome, mat in self.materiais.items():
-                linhas.append(f"  - {nome}: {mat.quantidade} ({mat.nivel_descricao})")
+            for nome, mat in sorted(self.materiais.items()):
+                perece = ""
+                if mat.validade >= 0:
+                    total = TEMPOS_VALIDADE.get(nome, 24)
+                    if mat.validade < total * 0.25:
+                        perece = " ⚠️ estragando"
+                    elif mat.validade < total * 0.5:
+                        perece = " ⏳ fresco"
+                    else:
+                        perece = " ✅ fresco"
+                linhas.append(f"  - {nome}: {mat.quantidade} ({mat.nivel_descricao}){perece}")
         
         if self.itens_craftados:
             linhas.append("🔧 Itens:")
-            for nome, qtd in self.itens_craftados.items():
+            for nome, qtd in sorted(self.itens_craftados.items()):
                 linhas.append(f"  - {nome}: {qtd}")
         
         if not linhas:

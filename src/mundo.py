@@ -15,6 +15,7 @@ from enum import Enum
 from typing import Optional, Callable
 import random
 from datetime import datetime
+from collections import defaultdict
 
 from personagem import (
     Personagem,
@@ -351,6 +352,7 @@ class Simulacao:
             "eventos": [],
             "encontros": [],
             "movimentos": [],
+            "crafting": [],
             "resumo_geral": ""
         }
         
@@ -372,6 +374,7 @@ class Simulacao:
             resultado_personagem = self._processar_personagem(personagem)
             resumo["encontros"].extend(resultado_personagem["encontros"])
             resumo["movimentos"].extend(resultado_personagem["movimentos"])
+            resumo["crafting"].extend(resultado_personagem["crafting"])
         
         # 4. RESOLVER INTERAÇÕES PENDENTES
         self._resolver_interacoes()
@@ -400,23 +403,39 @@ class Simulacao:
             "crafting": []
         }
         
-        # Verificar se pode agir
-        if not personagem.pode_interagir:
-            return resultado
-        
-        # Se está em movimento, avançar
+        # Se está em movimento, avançar (antes de pode_interagir)
         if personagem.estado == EstadoPersonagem.LOCOMOVENDO:
             self._processar_movimento(personagem)
             return resultado
         
-        # Se está dormindo
+        # Se está dormindo (antes de pode_interagir)
         if personagem.dormindo:
             self._processar_sono(personagem)
             return resultado
         
+        # Verificar se pode agir (só para estados ATIVO/ESPERANDO)
+        if not personagem.pode_interagir:
+            return resultado
+        
+        # Aplicar clima local nas necessidades
+        local = self.mapa.get_local(personagem.local_atual)
+        if local:
+            personagem.aplicar_clima_local(local.clima_local.value)
+        
         # Atualizar necessidades
         personagem.tick_necessidades()
         personagem.tick_afetos()
+        
+        # Auto-usar medicina se ferido e tiver itens
+        if personagem.necessidades.saude < 0.5:
+            for med_nome in ("remedio", "po_cura", "bandagem"):
+                if personagem.tem_item(med_nome):
+                    msg = personagem.usar_item(med_nome)
+                    self.estado.registrar_evento(
+                        f"{personagem.nome} {msg}",
+                        {"personagem": personagem.id, "item": med_nome}
+                    )
+                    break
         
         # Verificar se deve dormir
         if personagem.decidir_dormir():
@@ -441,7 +460,8 @@ class Simulacao:
                     objeto="perigo_local",
                     descricao=f"Encontro perigoso em {local.nome}",
                     intensidade=local.perigo,
-                    resultado_sugerido=ResultadoEncontro.DISSOLUCAO
+                    resultado_sugerido=ResultadoEncontro.DISSOLUCAO,
+                    disponibilidade=DisponibilidadeEncontro.SITUACIONAL
                 )
             )
             resultado["encontros"].append({
@@ -508,6 +528,36 @@ class Simulacao:
                 tag="crafting"
             ))
         
+        # Adicionar opções de DEPÓSITO (se personagem tem itens para depositar)
+        depositaveis = ["comida", "madeira", "colheita", "pedra"]
+        for dep_rec_nome in depositaveis:
+            # Verificar se local aceita esse recurso
+            if local:
+                rec = local.get_recurso(dep_rec_nome)
+                if not rec or not rec.disponivel:
+                    continue
+            # Verificar inventário
+            tem_para_depositar = False
+            if dep_rec_nome == "comida":
+                for c in ("comida", "carne_assada", "sopa", "pao", "refeicao", "carne_defumada"):
+                    if personagem.inventario.tem_material(c, 1):
+                        tem_para_depositar = True
+                        break
+            elif personagem.inventario.tem_material(dep_rec_nome, 1):
+                tem_para_depositar = True
+            
+            if tem_para_depositar:
+                encontros.append(EncontroDisponivel(
+                    id=f"depositar_{dep_rec_nome}",
+                    origem=OrigemEncontro.RECURSO,
+                    tipo=TipoEncontro.FISICO,
+                    objeto=f"depositar_{dep_rec_nome}",
+                    descricao=f"📥 Depositar {dep_rec_nome} no depósito comum",
+                    intensidade=0.2,
+                    disponibilidade=DisponibilidadeEncontro.SEMPRE,
+                    tag="producao"
+                ))
+        
         # Garantir que sempre haja encontros
         if not encontros:
             encontros.append(EncontroDisponivel(
@@ -572,17 +622,67 @@ class Simulacao:
                 resultado_craft = self._processar_crafting(personagem, receita_id)
                 resultado["crafting"].append(resultado_craft)
             
+            # Verificar se é DEPÓSITO
+            elif encontro_escolhido.objeto.startswith("depositar_"):
+                rec_nome = encontro_escolhido.objeto.replace("depositar_", "")
+                resultado_dep = self._processar_deposito(personagem, rec_nome)
+                resultado["encontros"].append({
+                    "personagem": personagem.nome,
+                    "tipo": "social",
+                    "resultado": resultado_dep["status"],
+                    "delta": 0.1,
+                    "descricao": resultado_dep["descricao"],
+                    "detalhes": resultado_dep["detalhes"],
+                    "objeto": encontro_escolhido.objeto
+                })
+            
             else:
                 # Processar encontro normal
                 resultado_encontro = self.motor_encontros.processar_encontro(
                     personagem,
                     encontro_escolhido
                 )
+                
+                # Consumir recurso local do mapa, se aplicável
+                if resultado_encontro.recurso_consumido:
+                    rec_nome = resultado_encontro.recurso_consumido
+                    rec_qtd = resultado_encontro.recurso_quantidade
+                    local = self.mapa.get_local(personagem.local_atual)
+                    if local:
+                        recurso = local.get_recurso(rec_nome)
+                        if recurso:
+                            consumido = recurso.consumir(rec_qtd)
+                            if consumido < rec_qtd * 0.5:
+                                resultado_encontro.detalhes += f" (⚠️ {rec_nome} escasso)"
+                        else:
+                            resultado_encontro.detalhes += f" (ℹ️ sem {rec_nome} no local)"
+                
+                # Aplicar dano à saúde
+                if resultado_encontro.dano_saude > 0:
+                    personagem.necessidades.saude -= resultado_encontro.dano_saude
+                    resultado_encontro.detalhes += f" (-{resultado_encontro.dano_saude:.0%} saúde)"
+                
+                # Processar depósito no recurso local
+                if resultado_encontro.recurso_depositado:
+                    rec_nome = resultado_encontro.recurso_depositado
+                    rec_qtd = resultado_encontro.recurso_depositado_qtd
+                    local = self.mapa.get_local(personagem.local_atual)
+                    if local:
+                        recurso = local.get_recurso(rec_nome)
+                        if recurso:
+                            recurso.quantidade_atual = min(
+                                recurso.maximo,
+                                recurso.quantidade_atual + rec_qtd
+                            )
+                
                 resultado["encontros"].append({
                     "personagem": personagem.nome,
                     "tipo": encontro_escolhido.tipo.value,
                     "resultado": resultado_encontro.resultado.value,
-                    "delta": resultado_encontro.delta_potencia
+                    "delta": resultado_encontro.delta_potencia,
+                    "descricao": encontro_escolhido.descricao,
+                    "detalhes": resultado_encontro.detalhes,
+                    "objeto": encontro_escolhido.objeto
                 })
         
         return resultado
@@ -610,7 +710,28 @@ class Simulacao:
                 if "água" in e.objeto or "poço" in e.objeto or "beber" in e.descricao.lower():
                     return e
         
-        # FASE 2: Personalidade guia ações quando saciado
+        # FASE 2: Coleta e crafting quando há materiais
+        craftings = [e for e in encontros if e.tag == "crafting"]
+        coletas = [e for e in encontros
+                   if e.tag in ("recurso", "alimento", "sobrevivencia", "producao")
+                   and e.origem != OrigemEncontro.SOCIAL
+                   and "mover_" not in e.objeto]
+        
+        # Se tem receitas disponíveis, chance de craftar
+        if craftings and random.random() < 0.35:
+            return random.choice(craftings)
+        
+        # Se não tem materiais no inventário, priorizar coleta
+        tem_materiais = any(qtd > 0 for qtd in personagem.inventario.get_materiais_dict().values())
+        if not tem_materiais and coletas and random.random() < 0.4:
+            return random.choice(coletas)
+        
+        # Se tem comida demais, chance de depositar no local
+        depositos = [e for e in encontros if "depositar" in e.objeto]
+        if depositos and random.random() < 0.15:
+            return random.choice(depositos)
+        
+        # FASE 3: Personalidade guia ações
         arquetipo = personagem.personalidade.arquetipo
         
         # Filósofo: busca conhecimento, reflexão, conversas profundas
@@ -629,7 +750,7 @@ class Simulacao:
             prioritarios = ["aventura", "explorar", "locomocao", "risco"]
             # Preferir se mover para novos locais
             movimentos = [e for e in encontros if "mover_" in e.objeto]
-            if movimentos and random.random() < 0.6:
+            if movimentos and random.random() < 0.4:
                 return random.choice(movimentos)
             for e in encontros:
                 if any(p in e.tag.lower() or p in e.descricao.lower() for p in prioritarios):
@@ -637,7 +758,7 @@ class Simulacao:
         
         # Prudente: busca segurança, planejamento, recursos
         elif arquetipo == "prudente":
-            prioritarios = ["seguranca", "recurso", "planejamento"]
+            prioritarios = ["seguranca", "recurso", "planejamento", "crafting"]
             for e in encontros:
                 if any(p in e.tag.lower() or p in e.descricao.lower() for p in prioritarios):
                     return e
@@ -658,7 +779,7 @@ class Simulacao:
         
         # Dominador: busca poder, controle, recursos valiosos
         elif arquetipo == "dominador":
-            prioritarios = ["poder", "recurso", "controle", "mineral"]
+            prioritarios = ["poder", "recurso", "controle", "mineral", "crafting"]
             for e in encontros:
                 if any(p in e.tag.lower() or p in e.descricao.lower() for p in prioritarios):
                     return e
@@ -673,15 +794,6 @@ class Simulacao:
             seguros = [e for e in encontros if "perigo" not in e.tag.lower() and e.intensidade < 0.4]
             if seguros:
                 return random.choice(seguros)
-        
-        # FASE 3: CRAFTING sempre é opção quando disponível
-        craftings = [e for e in encontros if hasattr(e, 'tag') and e.tag == "crafting"]
-        if craftings:
-            # Priorizar crafting se necessidades estão OK
-            if (personagem.necessidades.fome > 0.3 and 
-                personagem.necessidades.sede > 0.3 and
-                random.random() < 0.6):  # 60% chance
-                return random.choice(craftings)
         
         # Fallback baseado em necessidades restantes
         # Se energia baixa, descansar
@@ -750,6 +862,15 @@ class Simulacao:
         """Processa sono do personagem"""
         # Recuperar necessidades
         personagem.necessidades.energia += 0.08
+        personagem.necessidades.saude += 0.02  # sono recupera saúde
+        
+        # Abrigo recupera melhor na própria moradia
+        if personagem.tem_moradia and personagem.local_atual == personagem.moradia_local:
+            personagem.necessidades.abrigo += 0.02
+            personagem.necessidades.saude += 0.02  # dormir em casa recupera mais
+        else:
+            personagem.necessidades.abrigo += 0.005  # dormir ao relento
+        
         personagem.necessidades.normalizar()
         
         # Acordar quando energia alta
@@ -814,6 +935,17 @@ class Simulacao:
             }
         )
         
+        # Registrar no histórico do personagem
+        personagem.historico_crafting.append({
+            "tick": self.estado.tick_atual,
+            "receita": receita.nome,
+            "sucesso": resultado.resultado.value == "sucesso",
+            "itens": resultado.itens_criados,
+            "xp": resultado.xp_ganho
+        })
+        if len(personagem.historico_crafting) > 20:
+            personagem.historico_crafting.pop(0)
+        
         return {
             "personagem": personagem.nome,
             "receita": receita.nome,
@@ -821,6 +953,68 @@ class Simulacao:
             "mensagem": resultado.mensagem,
             "itens_criados": resultado.itens_criados,
             "xp_ganho": resultado.xp_ganho
+        }
+    
+    def _processar_deposito(self, personagem: Personagem, rec_nome: str) -> dict:
+        """
+        Personagem deposita comida/recurso no depósito comum do local.
+        """
+        local = self.mapa.get_local(personagem.local_atual)
+        if not local:
+            return {"status": "erro", "descricao": "Local inválido", "detalhes": ""}
+        
+        recurso = local.get_recurso(rec_nome)
+        if not recurso:
+            return {"status": "erro", "descricao": f"Sem depósito de {rec_nome} aqui", "detalhes": ""}
+        
+        # Pegar materiais do inventário que podem ser depositados
+        depositaveis = {
+            "comida": "comida",
+            "carne_assada": "comida",
+            "sopa": "comida",
+            "pao": "comida",
+            "refeicao": "comida",
+            "carne_defumada": "comida",
+            "colheita": "colheita",
+            "madeira": "madeira",
+            "pedra": "pedra",
+            "cogumelos": "comida",
+        }
+        
+        if rec_nome not in depositaveis:
+            return {"status": "erro", "descricao": f"{rec_nome} não pode ser depositado", "detalhes": ""}
+        
+        # Encontrar material correspondente no inventário
+        mat_alvo = rec_nome  # nome do material no inventário
+        if rec_nome == "comida":
+            # Priorizar comida fresca para depósito (estraga logo)
+            mat_alvo = "comida"
+            if not personagem.inventario.tem_material(mat_alvo, 1):
+                mat_alvo = "carne_assada"
+            if not personagem.inventario.tem_material(mat_alvo, 1):
+                mat_alvo = "sopa"
+            if not personagem.inventario.tem_material(mat_alvo, 1):
+                mat_alvo = "pao"
+            if not personagem.inventario.tem_material(mat_alvo, 1):
+                mat_alvo = "refeicao"
+            if not personagem.inventario.tem_material(mat_alvo, 1):
+                mat_alvo = "carne_defumada"
+        
+        if not personagem.inventario.tem_material(mat_alvo, 1):
+            return {"status": "erro", "descricao": f"Não tem {mat_alvo} para depositar", "detalhes": ""}
+        
+        # Remover do inventário e adicionar ao local
+        qtd_depositada = min(3, personagem.inventario.get_quantidade(mat_alvo))
+        personagem.inventario.remover_material(mat_alvo, qtd_depositada)
+        
+        # Recurso local ganha 0.1 por unidade depositada
+        ganho_local = qtd_depositada * 0.1
+        recurso.quantidade_atual = min(recurso.maximo, recurso.quantidade_atual + ganho_local)
+        
+        return {
+            "status": "sucesso",
+            "descricao": f"Depositou {qtd_depositada}x {mat_alvo} no {rec_nome} do {local.nome}",
+            "detalhes": f"+{ganho_local:.1f} de {rec_nome} no local"
         }
     
     def _listar_outros_no_local(self, personagem: Personagem) -> str:
@@ -1016,7 +1210,8 @@ class Simulacao:
             print("\n📚 Encontros:")
             for e in resumo["encontros"]:
                 emoji = "✅" if e.get("resultado") == "adequacao" else "❌" if e.get("resultado") == "dissolucao" else "➖"
-                print(f"   {emoji} {e['personagem']}: {e.get('tipo', 'encontro')} ({e.get('delta', 0):+.2f})")
+                desc = e.get("detalhes") or e.get("descricao", "")
+                print(f"   {emoji} {e['personagem']}: {desc} ({e.get('delta', 0):+.2f})")
         
         if resumo["movimentos"]:
             print("\n🚶 Movimentos:")
@@ -1064,6 +1259,387 @@ class Simulacao:
             print("\n\n⏹️  Simulação interrompida")
         
         self._mostrar_estatisticas_finais()
+    
+    def rodar_interativo(self, ticks_iniciais: int = 0):
+        """
+        Roda a simulação em modo interativo.
+        
+        Comandos disponíveis:
+          olhar <local>          — detalhes de um local
+          quem                   — lista todos personagens e onde estão
+          quem <local>           — personagens num local específico
+          personagem <nome>      — ficha completa do personagem
+          inventario <nome>      — inventário do personagem
+          habilidades <nome>     — habilidades do personagem
+          relacoes <nome>        — relações do personagem
+          conhecimento <nome>    — locais que o personagem conhece
+          continuar [n]          — roda n ticks (padrão 1)
+          mapa                   — mostra o mapa completo
+          tempo                  — hora/dia atual
+          ajuda                  — lista de comandos
+          sair                   — encerra a simulação
+        
+        Pressione Tab para autocompletar nomes de locais/personagens.
+        """
+        import cmd
+        
+        # Rodar ticks iniciais
+        for _ in range(ticks_iniciais):
+            if not self._tick_silencioso():
+                break
+        
+        intro = (
+            "\n🎮 MODO INTERATIVO"
+            "\n   Digite 'ajuda' para comandos ou 'continuar' para avançar."
+            "\n   Dica: use Tab para autocompletar nomes.\n"
+        )
+        
+        class REPLSimulacao(cmd.Cmd):
+            prompt = "⏳> "
+            
+            def __init__(self, sim):
+                super().__init__()
+                self.sim = sim
+                self._auto_continuar = False
+            
+            # ---- utilitários ----
+            
+            def _nomes_locais(self) -> list[str]:
+                return list(self.sim.mapa.locais.keys())
+            
+            def _nomes_personagens(self) -> list[str]:
+                return [p.nome.lower() for p in self.sim.personagens]
+            
+            def _buscar_personagem(self, nome: str) -> Optional[Personagem]:
+                nome = nome.strip().lower()
+                for p in self.sim.personagens:
+                    if p.nome.lower() == nome:
+                        return p
+                    if p.id == nome:
+                        return p
+                return None
+            
+            def _tick_com_display(self, qtd: int = 1):
+                for _ in range(qtd):
+                    self.sim.tick()
+                    print()
+            
+            def _formatar_necessidades(self, p: Personagem) -> str:
+                n = p.necessidades
+                return (f"Energia={n.energia:.0%} Fome={n.fome:.0%} "
+                        f"Sede={n.sede:.0%} Abrigo={n.abrigo:.0%} Saúde={n.saude:.0%}")
+            
+            def _formatar_afetos(self, p: Personagem) -> str:
+                a = p.afetos
+                return (f"Alegria={a.alegria:.2f} Tristeza={a.tristeza:.2f} "
+                        f"Desejo={a.desejo:.2f} Esperança={a.esperanca:.2f} Temor={a.temor:.2f}")
+            
+            def _barra_vida(self, valor: float, largura: int = 20) -> str:
+                preenchido = int(valor * largura)
+                return "█" * preenchido + "░" * (largura - preenchido)
+            
+            # ---- completador ----
+            
+            def completenames(self, text, *ignored):
+                """Tab completion for commands."""
+                d = self.completedefault(text, *ignored)
+                for cmd_name in self.get_names():
+                    if cmd_name.startswith("do_"):
+                        name = cmd_name[3:]
+                        if name.startswith(text):
+                            d.append(name)
+                return d
+            
+            def completedefault(self, text, line, begidx, endidx):
+                args = line.split()
+                if len(args) <= 1:
+                    return []
+                cmd = args[0]
+                if cmd in ("olhar",):
+                    return [n for n in self._nomes_locais() if n.startswith(text)]
+                if cmd in ("personagem", "inventario", "habilidades", "relacoes", "conhecimento"):
+                    return [n for n in self._nomes_personagens() if n.startswith(text)]
+                if cmd == "quem":
+                    return [n for n in self._nomes_locais() if n.startswith(text)]
+                return []
+            
+            # ---- comandos ----
+            
+            def do_olhar(self, arg):
+                """olhar <local> — detalhes de um local (recursos, clima, personagens presentes)"""
+                if not arg:
+                    print("   Use: olhar <local>")
+                    return
+                local_id = arg.strip().lower()
+                local = self.sim.mapa.get_local(local_id)
+                if not local:
+                    print(f"   Local '{local_id}' não encontrado. Locais: {', '.join(self._nomes_locais())}")
+                    return
+                
+                print()
+                print(local.descricao_completa())
+                
+                # Personagens aqui
+                aqui = self.sim.personagens_no_local(local_id)
+                if aqui:
+                    print(f"\n   👥 Aqui estão:")
+                    for p in aqui:
+                        estado = "💤" if p.dormindo else "🚶" if p.estado == EstadoPersonagem.LOCOMOVENDO else "🧑"
+                        print(f"      {estado} {p.nome} ({p.personalidade.arquetipo}) — potência: {p.potencia_atual:.0%}")
+            
+            def do_quem(self, arg):
+                """quem [local] — lista personagens. Se local for dado, filtra por local."""
+                if arg:
+                    local_id = arg.strip().lower()
+                    local = self.sim.mapa.get_local(local_id)
+                    if not local:
+                        print(f"   Local '{local_id}' não encontrado.")
+                        return
+                    personagens = self.sim.personagens_no_local(local_id)
+                    if not personagens:
+                        print(f"   Ninguém em {local.nome}.")
+                        return
+                    print(f"\n   👥 Em {local.nome}:")
+                    for p in personagens:
+                        estado = "💤" if p.dormindo else "🚶" if p.estado == EstadoPersonagem.LOCOMOVENDO else "🧑"
+                        print(f"      {estado} {p.nome} ({p.personalidade.arquetipo}) — {self._formatar_necessidades(p)}")
+                else:
+                    print(f"\n   👥 Personagens ({len(self.sim.personagens)}):")
+                    # Agrupar por local
+                    from collections import defaultdict
+                    por_local = defaultdict(list)
+                    for p in self.sim.personagens:
+                        por_local[p.local_atual].append(p)
+                    
+                    for local_id, ps in sorted(por_local.items()):
+                        local = self.sim.mapa.get_local(local_id)
+                        nome_local = local.nome if local else local_id
+                        print(f"\n      📍 {nome_local}:")
+                        for p in ps:
+                            estado = "💤" if p.dormindo else "🚶" if p.estado == EstadoPersonagem.LOCOMOVENDO else "🧑"
+                            print(f"         {estado} {p.nome} ({p.personalidade.arquetipo}) — potência: {p.potencia_atual:.0%}")
+            
+            def do_personagem(self, arg):
+                """personagem <nome> — ficha completa do personagem"""
+                if not arg:
+                    print("   Use: personagem <nome>")
+                    return
+                p = self._buscar_personagem(arg)
+                if not p:
+                    print(f"   Personagem '{arg}' não encontrado.")
+                    return
+                
+                tools_str = ", ".join(p.ferramentas_equipadas) if p.ferramentas_equipadas else "nenhuma"
+                moradia_str = f"🏠 {p.moradia_local}" if p.tem_moradia else "🚫 sem moradia"
+                print(f"""
+   ┌─ {p.nome} ──────────────────────────────────
+   │ Arquétipo: {p.personalidade.arquetipo}
+   │ Idade: {p.personalidade.idade}
+   │ Descrição: {p.personalidade.descricao}
+   │
+   │ 🌟 Potência: {p.potencia_atual:.0%}  {self._barra_vida(p.potencia_atual)}
+   │ 🧠 Razão: {p.razao_vs_paixao:.0%}
+   │ 📍 Local: {p.local_atual}
+   │ {moradia_str}
+   │ 🛠️  Ferramentas: {tools_str}
+   │ 🏷️  Estado: {p.estado.value}
+   │
+   │ 📊 Necessidades:
+   │    Energia: {p.necessidades.energia:.0%} {self._barra_vida(p.necessidades.energia)}
+   │    Fome:   {p.necessidades.fome:.0%} {self._barra_vida(p.necessidades.fome)}
+   │    Sede:   {p.necessidades.sede:.0%} {self._barra_vida(p.necessidades.sede)}
+   │    Abrigo: {p.necessidades.abrigo:.0%} {self._barra_vida(p.necessidades.abrigo)}
+   │    Saúde:  {p.necessidades.saude:.0%} {self._barra_vida(p.necessidades.saude)}
+   │
+   │ 💖 Afetos: {self._formatar_afetos(p)}
+   │
+   │ 📚 Encontros: {p.total_encontros} ({p.total_encontros_positivos}+, {p.total_encontros_negativos}-)
+   └─────────────────────────────────────────────""")
+            
+            def do_inventario(self, arg):
+                """inventario <nome> — mostra o inventário do personagem"""
+                if not arg:
+                    print("   Use: inventario <nome>")
+                    return
+                p = self._buscar_personagem(arg)
+                if not p:
+                    print(f"   Personagem '{arg}' não encontrado.")
+                    return
+                
+                desc = p.inventario.descricao()
+                print(f"\n   📦 Inventário de {p.nome}:")
+                for linha in desc.split("\n"):
+                    print(f"     {linha}")
+            
+            def do_habilidades(self, arg):
+                """habilidades <nome> — mostra habilidades do personagem"""
+                if not arg:
+                    print("   Use: habilidades <nome>")
+                    return
+                p = self._buscar_personagem(arg)
+                if not p:
+                    print(f"   Personagem '{arg}' não encontrado.")
+                    return
+                
+                if not p.habilidades:
+                    print(f"\n   {p.nome} não tem habilidades.")
+                    return
+                
+                print(f"\n   ⚡ Habilidades de {p.nome}:")
+                # Ordenar por nível (maior primeiro)
+                for nome, hab in sorted(p.habilidades.items(), key=lambda x: -x[1].nivel):
+                    barra = self._barra_vida(hab.nivel, 15)
+                    print(f"      {barra} {nome}: {hab.nivel_descricao} ({hab.nivel:.0%})  XP: {hab.experiencia}/{hab.xp_proximo_nivel}")
+            
+            def do_relacoes(self, arg):
+                """relacoes <nome> — mostra relações do personagem"""
+                if not arg:
+                    print("   Use: relacoes <nome>")
+                    return
+                p = self._buscar_personagem(arg)
+                if not p:
+                    print(f"   Personagem '{arg}' não encontrado.")
+                    return
+                
+                if not p.relacoes:
+                    print(f"\n   {p.nome} não tem relações registradas.")
+                    return
+                
+                emoji_tipo = {"personagem": "🧑", "local": "📍", "item": "📦", "atividade": "⚡", "clima": "🌤️"}
+                print(f"\n   🤝 Relações de {p.nome}:")
+                for rid, r in sorted(p.relacoes.items(), key=lambda x: -x[1].afeto):
+                    emoji = "❤️" if r.afeto > 0.1 else "💔" if r.afeto < -0.1 else "➖"
+                    tipo_emoji = emoji_tipo.get(r.tipo, "❓")
+                    print(f"      {emoji} {tipo_emoji} {r.entidade_nome}: {r.sentimento}  afeto={r.afeto:+.2f}")
+            
+            def do_crafting(self, arg):
+                """crafting <nome> — histórico de crafting do personagem"""
+                if not arg:
+                    print("   Use: crafting <nome>")
+                    return
+                p = self._buscar_personagem(arg)
+                if not p:
+                    print(f"   Personagem '{arg}' não encontrado.")
+                    return
+
+                if not p.historico_crafting:
+                    print(f"\n   {p.nome} nunca craftou nada.")
+                    return
+
+                print(f"\n   🔨 Histórico de Crafting de {p.nome}:")
+                for h in reversed(p.historico_crafting[-10:]):
+                    status = "✅" if h["sucesso"] else "❌"
+                    itens = ", ".join(h["itens"]) if h["itens"] else "-"
+                    print(f"      {status} Tick {h['tick']} | {h['receita']} → {itens} | XP +{h['xp']}")
+
+            def do_conhecimento(self, arg):
+                """conhecimento <nome> — mostra locais conhecidos pelo personagem"""
+                if not arg:
+                    print("   Use: conhecimento <nome>")
+                    return
+                p = self._buscar_personagem(arg)
+                if not p:
+                    print(f"   Personagem '{arg}' não encontrado.")
+                    return
+                
+                print(f"\n   🗺️  Conhecimento de {p.nome}:")
+                print(f"      {p.get_contexto_conhecimento()}")
+            
+            def do_continuar(self, arg):
+                """continuar [n] — roda n ticks (padrão 1)"""
+                try:
+                    n = int(arg) if arg else 1
+                except ValueError:
+                    n = 1
+                if n < 1:
+                    n = 1
+                self._tick_com_display(n)
+            
+            def do_auto(self, arg):
+                """auto [n] — roda n ticks rapidamente (sem display detalhado entre eles)"""
+                try:
+                    n = int(arg) if arg else 5
+                except ValueError:
+                    n = 5
+                print(f"   Rodando {n} ticks...")
+                for _ in range(n):
+                    self.sim.tick()
+                print(f"   Tick {self.sim.estado.tick_atual} | Dia {self.sim.estado.dia} {self.sim.estado.nome_periodo} ({self.sim.estado.hora}:00)")
+            
+            def do_mapa(self, arg):
+                """mapa — mostra o mapa completo com todos os locais"""
+                print()
+                print(self.sim.mapa.descrever_mundo())
+            
+            def do_tempo(self, arg):
+                """tempo — mostra hora/dia atual"""
+                e = self.sim.estado
+                print(f"\n   ⏰ Tick {e.tick_atual} | Dia {e.dia} | Semana {e.semana} | {e.nome_periodo} ({e.hora}:00)")
+                if e.eventos_ativos:
+                    print(f"\n   🎯 Eventos ativos:")
+                    for ev in e.eventos_ativos:
+                        print(f"      - {ev.nome}: {ev.descricao} ({ev.duracao - ev.tick_atual} ticks restantes)")
+            
+            def do_ajuda(self, arg):
+                """ajuda — mostra lista de comandos"""
+                print("""
+   🎮 COMANDOS:
+     olhar <local>          — detalhes de um local
+     quem [local]           — lista personagens (no mundo ou num local)
+     personagem <nome>      — ficha completa do personagem
+     inventario <nome>      — inventário do personagem
+     habilidades <nome>     — habilidades do personagem
+     relacoes <nome>        — relações do personagem
+      crafting <nome>        — histórico de crafting do personagem
+      conhecimento <nome>    — locais que o personagem conhece
+      continuar [n]          — roda n ticks com display (padrão 1)
+      auto [n]               — roda n ticks sem display (padrão 5)
+      mapa                   — mostra o mapa completo
+      tempo                  — hora/dia e eventos ativos
+      ajuda                  — esta mensagem
+      sair                   — encerra a simulação
+   
+   Dica: use Tab para autocompletar nomes de locais e personagens.
+                """)
+            
+            def do_sair(self, arg):
+                """sair — encerra a simulação"""
+                print("\n   ⏹️  Encerrando simulação...")
+                return True
+            
+            def do_EOF(self, arg):
+                return True
+            
+            # atalhos
+            do_q = do_quem
+            do_s = do_sair
+            do_c = do_continuar
+            do_h = do_ajuda
+            do_craft = do_crafting
+            do_help = do_ajuda
+            do_interrogacao = do_ajuda
+            
+            def default(self, line):
+                if line.strip() == '?':
+                    return self.do_ajuda('')
+                print(f"   Comando desconhecido: {line.strip()}  (digite 'ajuda')")
+        
+        repl = REPLSimulacao(self)
+        try:
+            repl.cmdloop(intro)
+        except KeyboardInterrupt:
+            print()
+        self._mostrar_estatisticas_finais()
+    
+    def _tick_silencioso(self) -> bool:
+        """Roda um tick sem display. Retorna False se interrompido."""
+        old = self.callback_display
+        self.callback_display = lambda x: None
+        try:
+            self.tick()
+            return True
+        finally:
+            self.callback_display = old
     
     def _mostrar_estatisticas_finais(self):
         """Mostra estatísticas ao final"""
@@ -1191,8 +1767,19 @@ def criar_simulacao_padrao() -> Simulacao:
 # =============================================================================
 
 if __name__ == "__main__":
-    # Criar e rodar simulação
+    import sys
+    
     sim = criar_simulacao_padrao()
     
-    # Rodar 20 ticks
-    sim.rodar(ticks=20)
+    if "--interativo" in sys.argv or "-i" in sys.argv:
+        # Extrair ticks iniciais opcionais (ex: -i 5)
+        ticks = 0
+        for i, arg in enumerate(sys.argv):
+            if arg in ("--interativo", "-i") and i + 1 < len(sys.argv):
+                try:
+                    ticks = int(sys.argv[i + 1])
+                except ValueError:
+                    pass
+        sim.rodar_interativo(ticks_iniciais=ticks)
+    else:
+        sim.rodar(ticks=20)

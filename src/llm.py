@@ -336,23 +336,26 @@ class GeradorPrompts:
         contexto: dict
     ) -> str:
         """
-        Gera prompt para decisão do personagem
+        Gera prompt objetivo para decisão do personagem.
+        Formato direto (sem roleplay) para evitar recusa do LLM pequeno.
         """
-        # Formatar encontros
         encontros_texto = "\n".join([
-            f"{i+1}. {e.descricao} (tipo: {e.tipo.value}, intensidade: {e.intensidade:.1f})"
+            f"{i+1}. {e.descricao}"
             for i, e in enumerate(encontros)
         ])
         
-        # Formatar memórias relevantes
-        memorias = personagem.get_contexto_memoria()
-        
-        prompt = f"""Papel: Você É {personagem.personalidade.nome}. Não é assistente.
-{personagem.personalidade.nome} está com fome {personagem.necessidades.fome:.0%} e sede {personagem.necessidades.sede:.0%}.
-{personagem.personalidade.nome} pode:
+        prompt = f"""Dada a situação, qual a MELHOR escolha para {personagem.personalidade.nome}?
+
+Estado atual:
+- Fome: {personagem.necessidades.fome:.0%}
+- Sede: {personagem.necessidades.sede:.0%}
+- Energia: {personagem.necessidades.energia:.0%}
+- Personalidade: {personagem.personalidade.arquetipo}
+
+Opções:
 {encontros_texto}
 
-{personagem.personalidade.nome} escolhe:"""
+Responda APENAS com o NÚMERO da opção escolhida:"""
         return prompt
     
     @staticmethod
