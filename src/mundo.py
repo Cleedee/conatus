@@ -393,12 +393,18 @@ class Simulacao:
             )
             resumo["eventos"].append(novo_evento.nome)
         
-        # 3. COLHER DECISÕES LLM PENDENTES (assíncrono, tick anterior)
-        decisoes_llm = self._colher_decisoes_llm()
+        # 3. CONSULTAR LLM (síncrono — bloqueia até resposta)
+        decisoes_llm = {}
+        decisao_llm = self._consultar_llm_sincrono()
+        if decisao_llm:
+            pid = decisao_llm.get("_personagem_id")
+            if pid:
+                decisoes_llm[pid] = decisao_llm
+                razao = decisao_llm.get('razao','')
+                print(f"   ✅ Decisão LLM para {pid}: \"{razao}\"")
         
         # 4. PROCESSAR CADA PERSONAGEM
         for personagem in self.personagens:
-            # Só usa decisão LLM se o personagem for controlado por LLM
             predef = decisoes_llm.get(personagem.id) if personagem.controlado_por_llm else None
             resultado_personagem = self._processar_personagem(
                 personagem,
@@ -408,9 +414,6 @@ class Simulacao:
             resumo["encontros"].extend(resultado_personagem["encontros"])
             resumo["movimentos"].extend(resultado_personagem["movimentos"])
             resumo["crafting"].extend(resultado_personagem["crafting"])
-        
-        # 5. DISPARAR PRÓXIMO LLM (assíncrono, não bloqueia)
-        self._disparar_proximo_llm()
         
         # 6. RESOLVER INTERAÇÕES PENDENTES
         self._resolver_interacoes()
@@ -628,6 +631,39 @@ class Simulacao:
             except Exception as e:
                 print(f"   ⚠ LLM falhou para {p.nome}: {e}")
             break  # Só dispara um por tick
+
+    def _consultar_llm_sincrono(self) -> Optional[dict]:
+        """
+        Consulta LLM de forma síncrona (bloqueante) para o personagem
+        controlado por LLM. Retorna a decisão ou None.
+        """
+        if not self.agente_llm or not self.agente_llm.verificar_pronto():
+            return None
+
+        # Encontrar personagem LLM que pode agir
+        personagem = None
+        for p in self.personagens:
+            if p.controlado_por_llm and p.pode_interagir and not p.dormindo \
+                    and p.estado != EstadoPersonagem.LOCOMOVENDO:
+                personagem = p
+                break
+        if not personagem:
+            return None
+
+        encontros = self._obter_encontros(personagem)
+        if not encontros:
+            return None
+
+        contexto = {
+            "local": personagem.local_atual,
+            "hora": self.estado.hora,
+            "outros": self._listar_outros_no_local(personagem),
+        }
+
+        print(f"   🧠 LLM consultado para {personagem.nome} (tick {self.estado.tick_atual})")
+        decisao = self.agente_llm.decidir_acao(personagem, encontros, contexto)
+        decisao["_personagem_id"] = personagem.id
+        return decisao
 
     def _processar_personagem(
         self,
@@ -1678,5 +1714,9 @@ if __name__ == "__main__":
     
     if args.interativo is not None:
         sim.rodar_interativo(ticks_iniciais=args.interativo)
+    elif args.llm:
+        # LLM: roda sem pausas — cada tick espera o LLM responder
+        sim.rodar()
     else:
-        sim.rodar(pausa_a_cada=2)
+        # Sem LLM: 50 ticks e encerra
+        sim.rodar(ticks=50, pausa_a_cada=None)
