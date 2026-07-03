@@ -278,6 +278,7 @@ class GeradorEncontros:
                     "descricao": "Minerar minerais preciosos",
                     "intensidade": 0.35,
                     "requer_necessidade": ("energia", 0.6),
+                    "requer_ferramenta": "picareta",
                     "tag": "recurso"
                 },
                 {
@@ -613,6 +614,8 @@ class ProcessadorEncontros:
             "caça": self._efeito_caca,
             "peixe": self._efeito_peixe,
             "oficina": self._efeito_oficina,
+            "pedra": self._efeito_minerar,
+            "mineral": self._efeito_minerar,
         }
     
     def processar(
@@ -969,6 +972,50 @@ class ProcessadorEncontros:
             delta_potencia=delta,
             sucesso=True,
             ganho_recurso=ganho,
+            detalhes=detalhes
+        )
+    
+    def _efeito_minerar(
+        self,
+        personagem: Personagem,
+        encontro: EncontroDisponivel
+    ) -> ResultadoEncontroProcessado:
+        """Efeito de mineração (pedra/mineral)"""
+        tem_ferr, ferr_texto = self._checar_ferramenta(encontro, personagem)
+        personagem.necessidades.energia -= 0.2
+        
+        if tem_ferr:
+            sucesso = True
+            if encontro.objeto in self.RECURSOS_COLETAVEIS:
+                mat_nome, mat_qtd = self.RECURSOS_COLETAVEIS[encontro.objeto]
+                qtd_real = mat_qtd + random.randint(0, 1)  # bônus com ferramenta
+                personagem.inventario.adicionar_material(mat_nome, qtd_real, qualidade=1.0)
+                detalhes = f"Minerou{ferr_texto} (+{qtd_real} {mat_nome})"
+                ganho = mat_nome
+            else:
+                ganho = None
+                detalhes = f"Minerou{ferr_texto}"
+            resultado = ResultadoEncontro.ADEQUACAO
+            delta = 0.25
+        else:
+            sucesso = False
+            ganho = None
+            detalhes = f"Não consegue minerar{ferr_texto}"
+            resultado = ResultadoEncontro.DISSOLUCAO
+            delta = -0.1
+        
+        rec_nome = self.OBJETO_PARA_RECURSO.get(encontro.objeto)
+        recurso_consumido = rec_nome if sucesso else None
+        recurso_qtd = 0.3 if sucesso else 0.0
+        
+        return ResultadoEncontroProcessado(
+            encontro=encontro,
+            resultado=resultado,
+            delta_potencia=delta,
+            sucesso=sucesso,
+            ganho_recurso=ganho,
+            recurso_consumido=recurso_consumido,
+            recurso_quantidade=recurso_qtd,
             detalhes=detalhes
         )
 
