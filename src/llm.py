@@ -497,10 +497,11 @@ class ParseRespostas:
         for json_str in padrao_json:
             try:
                 resultado = json.loads(json_str)
-                # Mesclar com padrão
-                for chave, valor in padrao.items():
-                    if chave not in resultado:
-                        resultado[chave] = valor
+                # Mesclar com padrão (se fornecido)
+                if padrao is not None:
+                    for chave, valor in padrao.items():
+                        if chave not in resultado:
+                            resultado[chave] = valor
                 return resultado
             except json.JSONDecodeError:
                 continue

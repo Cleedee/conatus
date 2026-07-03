@@ -556,14 +556,17 @@ class Simulacao:
                 try:
                     decisao = futuro.result()
                     resultado[pid] = decisao
+                    razao = decisao.get('razao','')
                     self.estado.registrar_evento(
-                        f"LLM→{pid} (tick {tick_origem}): {decisao.get('razao','')[:60]}",
+                        f"LLM→{pid} (tick {tick_origem}): {razao[:60]}",
                         {"decisao": decisao}
                     )
+                    print(f"   ✅ Decisão LLM para {pid}: \"{razao}\"")
                 except Exception as e:
                     self.estado.registrar_evento(
                         f"LLM falhou para {pid}: {e}", {}
                     )
+                    print(f"   ⚠ Decisão LLM falhou para {pid}: {e}")
                 ticks_prontos.append(tick_origem)
         
         # Limpar futuros concluídos
@@ -620,8 +623,9 @@ class Simulacao:
                 )
                 t.start()
                 self._llm_fila[self.estado.tick_atual] = (p.id, futuro)
-            except Exception:
-                pass
+                print(f"   🧠 LLM consultado para {p.nome} (tick {self.estado.tick_atual})")
+            except Exception as e:
+                print(f"   ⚠ LLM falhou para {p.nome}: {e}")
             break  # Só dispara um por tick
 
     def _processar_personagem(
