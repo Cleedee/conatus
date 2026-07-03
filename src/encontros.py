@@ -170,6 +170,15 @@ class GeradorEncontros:
                 },
                 {
                     "tipo": TipoEncontro.RECURSO,
+                    "objeto": "madeira",
+                    "descricao": "Cortar madeira no bosque próximo",
+                    "intensidade": 0.2,
+                    "requer_necessidade": ("energia", 0.4),
+                    "requer_ferramenta": "machado",
+                    "tag": "recurso"
+                },
+                {
+                    "tipo": TipoEncontro.RECURSO,
                     "objeto": "oficina",
                     "descricao": "Usar ferramentas na oficina",
                     "intensidade": 0.25,
@@ -297,7 +306,7 @@ class GeradorEncontros:
                     "tag": "desconforto"
                 }
             ],
-            "praira": [
+            "planicie": [
                 {
                     "tipo": TipoEncontro.RECURSO,
                     "objeto": "colheita",
@@ -311,6 +320,13 @@ class GeradorEncontros:
                     "descricao": "Buscar ervas medicinais",
                     "intensidade": 0.2,
                     "tag": "saude"
+                },
+                {
+                    "tipo": TipoEncontro.RECURSO,
+                    "objeto": "grama",
+                    "descricao": "Colher grama para artesanato",
+                    "intensidade": 0.15,
+                    "tag": "recurso"
                 },
                 {
                     "tipo": TipoEncontro.AMBIENTAL,
@@ -338,11 +354,97 @@ class GeradorEncontros:
                 },
                 {
                     "tipo": TipoEncontro.AMBIENTAL,
-                    "objeto": "maré",
+                    "objeto": "mare",
                     "descricao": "Cuidado com a maré alta",
                     "intensidade": 0.2,
                     "resultado_sugerido": ResultadoEncontro.DISSOLUCAO,
                     "tag": "risco"
+                }
+            ],
+            "lago": [
+                {
+                    "tipo": TipoEncontro.RECURSO,
+                    "objeto": "peixe",
+                    "descricao": "Pescar no lago sereno",
+                    "intensidade": 0.2,
+                    "requer_necessidade": ("energia", 0.3),
+                    "requer_ferramenta": "vara_pesca",
+                    "tag": "alimento"
+                },
+                {
+                    "tipo": TipoEncontro.RECURSO,
+                    "objeto": "agua_fresca",
+                    "descricao": "Beber água do lago",
+                    "intensidade": 0.15,
+                    "tag": "sobrevivencia"
+                },
+                {
+                    "tipo": TipoEncontro.AMBIENTAL,
+                    "objeto": "natureza",
+                    "descricao": "Meditar à beira do lago",
+                    "intensidade": 0.15,
+                    "resultado_sugerido": ResultadoEncontro.ADEQUACAO,
+                    "tag": "bem_estar"
+                }
+            ],
+            "pantano": [
+                {
+                    "tipo": TipoEncontro.RECURSO,
+                    "objeto": "cogumelos",
+                    "descricao": "Coletar cogumelos raros",
+                    "intensidade": 0.2,
+                    "tag": "alimento"
+                },
+                {
+                    "tipo": TipoEncontro.RECURSO,
+                    "objeto": "ervas_medicinais",
+                    "descricao": "Buscar ervas no pântano",
+                    "intensidade": 0.25,
+                    "tag": "saude"
+                },
+                {
+                    "tipo": TipoEncontro.RECURSO,
+                    "objeto": "madeira",
+                    "descricao": "Cortar madeira podre",
+                    "intensidade": 0.2,
+                    "requer_necessidade": ("energia", 0.4),
+                    "requer_ferramenta": "machado",
+                    "tag": "recurso"
+                },
+                {
+                    "tipo": TipoEncontro.AMBIENTAL,
+                    "objeto": "perigo_floresta",
+                    "descricao": "Evitar criaturas do pântano",
+                    "intensidade": 0.3,
+                    "resultado_sugerido": ResultadoEncontro.DISSOLUCAO,
+                    "tag": "risco"
+                }
+            ],
+            "ruinas": [
+                {
+                    "tipo": TipoEncontro.RECURSO,
+                    "objeto": "pedra",
+                    "descricao": "Coletar pedras das ruínas",
+                    "intensidade": 0.2,
+                    "requer_necessidade": ("energia", 0.4),
+                    "requer_ferramenta": "picareta",
+                    "tag": "recurso"
+                },
+                {
+                    "tipo": TipoEncontro.RECURSO,
+                    "objeto": "mineral",
+                    "descricao": "Extrair minerais dos escombros",
+                    "intensidade": 0.3,
+                    "requer_necessidade": ("energia", 0.5),
+                    "requer_ferramenta": "picareta",
+                    "tag": "recurso"
+                },
+                {
+                    "tipo": TipoEncontro.COGNITIVO,
+                    "objeto": "vista_panoramica",
+                    "descricao": "Explorar as ruínas antigas",
+                    "intensidade": 0.2,
+                    "tag": "sabedoria"
                 }
             ]
         }
@@ -643,6 +745,10 @@ class ProcessadorEncontros:
         "marisco": ("comida", 2),
         "agua_fresca": ("água", 2),
         "cogumelos": ("cogumelos", 2),
+        "sal": ("sal", 1),
+        "madeira_marinha": ("madeira", 1),
+        "pedras_lisas": ("pedra", 1),
+        "grama": ("grama", 2),
     }
     
     # Mapeamento objeto_encontro → nome_recurso_local (para consumir do mapa)
@@ -659,6 +765,10 @@ class ProcessadorEncontros:
         "marisco": "comida",
         "agua_fresca": "água",
         "cogumelos": "cogumelos",
+        "sal": "sal",
+        "madeira_marinha": "madeira_marinha",
+        "pedras_lisas": "pedras_lisas",
+        "grama": "grama",
     }
 
     def _processar_generico(
