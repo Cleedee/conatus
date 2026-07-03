@@ -352,7 +352,7 @@ class Personagem:
             },
             "prudente": {
                 "construtor": 0.2,
-                "artesao": 0.2,
+                "agricultor": 0.2,
                 "planejamento": 0.3
             },
             "generoso": {

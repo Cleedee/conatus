@@ -411,7 +411,41 @@ class BancoReceitas:
             xp_ganho=30,
             dificuldade=0.4
         ))
-        
+
+        # === AGRICULTURA ===
+
+        self.adicionar(Receita(
+            id="plantar",
+            nome="Plantar e Cultivar",
+            descricao="Plantar sementes, regar e colher",
+            tipo=TipoReceita.PROCESSAMENTO,
+            materiais={"colheita": 1, "água": 2},
+            habilidade_requerida="agricultor",
+            nivel_minimo=0.1,
+            resultado_nome="colheita",
+            resultado_quantidade=4,
+            resultado_descricao="Colheita fresca da roça",
+            xp_ganho=25,
+            dificuldade=0.2,
+            tempo_crafting=3
+        ))
+
+        self.adicionar(Receita(
+            id="adubar_solo",
+            nome="Adubar e Preparar Solo",
+            descricao="Preparar terra para plantio com adubo natural",
+            tipo=TipoReceita.PROCESSAMENTO,
+            materiais={"colheita": 2, "água": 1, "grama": 2},
+            habilidade_requerida="agricultor",
+            nivel_minimo=0.3,
+            resultado_nome="colheita",
+            resultado_quantidade=6,
+            resultado_descricao="Colheita abundante com solo preparado",
+            xp_ganho=40,
+            dificuldade=0.4,
+            tempo_crafting=5
+        ))
+
         self.adicionar(Receita(
             id="fazer_refeicao",
             nome="Fazer Refeição Completa",

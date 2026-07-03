@@ -33,6 +33,23 @@ class CondicaoClima(Enum):
     CALOR_EXTREMO = "calor_extremo"
 
 
+class Estacao(Enum):
+    """Estações do ano"""
+    PRIMAVERA = "primavera"
+    VERAO = "verao"
+    OUTONO = "outono"
+    INVERNO = "inverno"
+
+
+# Pesos de clima por estação: [NORMAL, CHUVA, SECA, TEMPESTADE, NEVE, CALOR_EXTREMO]
+PESOS_CLIMA_POR_ESTACAO: dict[Estacao, list[float]] = {
+    Estacao.PRIMAVERA: [35, 30, 5,  10, 10, 10],
+    Estacao.VERAO:     [30, 5,  30, 5,  5,  25],
+    Estacao.OUTONO:    [40, 15, 10, 15, 15, 5],
+    Estacao.INVERNO:   [30, 10, 5,  15, 30, 10],
+}
+
+
 # =============================================================================
 # ESTRUTURAS
 # =============================================================================
@@ -145,7 +162,7 @@ class Local:
         nomes = {0: "ermo", 1: "acampamento", 2: "povoado", 3: "vila"}
         return nomes.get(self.nivel_desenvolvimento, "ermo")
     
-    def tick(self):
+    def tick(self, estacao: Estacao = Estacao.PRIMAVERA):
         """Atualiza estado do local a cada tick"""
         # Calcular multiplicador climático para renovação
         if self.clima_local == CondicaoClima.SECA:
@@ -167,15 +184,14 @@ class Local:
             else:
                 recurso.renovar()
 
-        # Chance de mudar clima
+        # Chance de mudar clima (com pesos da estação)
         if random.random() < 0.05:  # 5% por tick
-            self._mudar_clima()
-    
-    def _mudar_clima(self):
-        """Muda clima aleatoriamente"""
+            self._mudar_clima(estacao)
+
+    def _mudar_clima(self, estacao: Estacao = Estacao.PRIMAVERA):
+        """Muda clima aleatoriamente, influenciado pela estação"""
         opcoes = list(CondicaoClima)
-        # Manter mais provável ser normal
-        pesos = [50, 15, 15, 5, 10, 5]
+        pesos = PESOS_CLIMA_POR_ESTACAO.get(estacao, [50, 15, 15, 5, 10, 5])
         self.clima_local = random.choices(opcoes, weights=pesos)[0]
     
     @property
@@ -359,10 +375,10 @@ class Mapa:
         """Retorna locais com perigo baixo"""
         return [l for l in self.locais.values() if l.perigo < 0.3]
     
-    def tick(self):
-        """Atualiza todos os locais"""
+    def tick(self, estacao: Estacao = Estacao.PRIMAVERA):
+        """Atualiza todos os locais com a estação atual"""
         for local in self.locais.values():
-            local.tick()
+            local.tick(estacao)
     
     def descrever_mundo(self) -> str:
         """Retorna descrição completa do mundo"""

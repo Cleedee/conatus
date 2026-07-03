@@ -32,7 +32,7 @@ from encontros import (
     ResultadoEncontroProcessado,
     DisponibilidadeEncontro
 )
-from mapa import Mapa, Local, criar_mapa_padrao
+from mapa import Mapa, Local, criar_mapa_padrao, Estacao
 from llm import AgenteLLM, criar_llm, ConfigLLM
 from habilidades import MotorCrafting, BancoReceitas, TipoReceita
 from mercado import Mercado, TipoTransacao
@@ -78,15 +78,18 @@ class EstadoMundo:
     hora: int = 8               # hora do dia (0-23)
     dia: int = 1
     semana: int = 1
-    
+
+    # Estação (muda a cada 7 dias)
+    estacao_atual: Estacao = Estacao.PRIMAVERA
+
     # Estatísticas
     total_encontros: int = 0
     total_encontros_positivos: int = 0
     total_encontros_negativos: int = 0
-    
+
     # Eventos ativos
     eventos_ativos: list[EventoMundo] = field(default_factory=list)
-    
+
     # Histórico
     historico: list[dict] = field(default_factory=list)
     
@@ -111,21 +114,25 @@ class EstadoMundo:
         """Avança um tick"""
         self.tick_atual += 1
         self.hora += 1
-        
+
         # Reset diário
         if self.hora >= 24:
             self.hora = 0
             self.dia += 1
-            
-            # Reset semanal
+
+            # Reset semanal e avançar estação
             if self.dia > 7:
                 self.dia = 1
                 self.semana += 1
-        
+                # Avançar estação: PRIMAVERA → VERAO → OUTONO → INVERNO → PRIMAVERA
+                estacoes = list(Estacao)
+                idx = estacoes.index(self.estacao_atual)
+                self.estacao_atual = estacoes[(idx + 1) % len(estacoes)]
+
         # Processar eventos
         for evento in self.eventos_ativos:
             evento.avancar_tick()
-        
+
         # Remover eventos expirados
         self.eventos_ativos = [e for e in self.eventos_ativos if e.ativo]
     
@@ -148,6 +155,14 @@ class EstadoMundo:
 # GERADOR DE EVENTOS
 # =============================================================================
 
+# Pesos de eventos por estação: [CHUVA, SECA, TEMPESTADE, COLHEITA, DOENCA, VISITANTE, DESCOBERTA]
+PESOS_EVENTOS_POR_ESTACAO: dict[Estacao, list[float]] = {
+    Estacao.PRIMAVERA: [30, 5,  10, 15, 10, 3, 2],
+    Estacao.VERAO:     [5,  30, 5,  20, 15, 3, 2],
+    Estacao.OUTONO:    [15, 10, 15, 30, 5,  5, 5],
+    Estacao.INVERNO:   [10, 15, 15, 5,  25, 3, 2],
+}
+
 class GeradorEventos:
     """
     Gera eventos aleatórios no mundo
@@ -159,18 +174,19 @@ class GeradorEventos:
     
     def verificar_novo_evento(self, estado: EstadoMundo) -> Optional[EventoMundo]:
         """
-        Verifica se deve gerar novo evento
+        Verifica se deve gerar novo evento (influenciado pela estação)
         """
         # Chance base de evento: 5% por tick
         if random.random() > 0.05:
             return None
-        
-        # Escolher tipo de evento
-        tipo = random.choices(
-            list(TipoEventoMundo),
-            weights=[20, 15, 5, 15, 10, 3, 2]  # pesos
-        )[0]
-        
+
+        # Escolher tipo de evento com pesos da estação
+        pesos = PESOS_EVENTOS_POR_ESTACAO.get(
+            estado.estacao_atual,
+            [20, 15, 5, 15, 10, 3, 2]
+        )
+        tipo = random.choices(list(TipoEventoMundo), weights=pesos)[0]
+
         return self._criar_evento(tipo, estado)
     
     def _criar_evento(
@@ -402,7 +418,7 @@ class Simulacao:
     def _tick_mundo(self):
         """Atualiza estado do mundo"""
         self.estado.avancar_tick()
-        self.mapa.tick()
+        self.mapa.tick(self.estado.estacao_atual)
     
     def _processar_personagem(self, personagem: Personagem) -> dict:
         """
