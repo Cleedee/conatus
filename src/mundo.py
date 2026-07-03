@@ -529,6 +529,16 @@ class Simulacao:
         )
         
         for receita in receitas_possiveis[:3]:  # Limitar a 3 opções
+            # Construções só são oferecidas se há motivo para construir aqui
+            if receita.tipo == TipoReceita.CONSTRUCAO:
+                motivo = (
+                    personagem.necessidades.abrigo < 0.5
+                    or personagem.moradia_local == personagem.local_atual
+                    or (local and bool(local.construcoes))
+                )
+                if not motivo:
+                    continue
+            
             encontros.append(EncontroDisponivel(
                 id=f"craft_{receita.id}",
                 origem=OrigemEncontro.RECURSO,
