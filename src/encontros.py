@@ -947,16 +947,18 @@ class ProcessadorEncontros:
         if personagem.get_nivel_habilidade("construtor") >= 0.1:
             producoes_possiveis.append(("pranchas", "desbastou pranchas de madeira"))
         
-        if not producoes_possiveis:
-            producoes_possiveis = [("ferramentas", "fabricou ferramentas básicas")]
-        
-        item, desc = random.choice(producoes_possiveis)
-        qtd = random.randint(1, 3)
-        
-        if item in ("cordas",):
-            personagem.inventario.adicionar_item(item, qtd)
+        if producoes_possiveis:
+            item, desc = random.choice(producoes_possiveis)
+            qtd = random.randint(1, 3)
+            if item in ("cordas",):
+                personagem.inventario.adicionar_item(item, qtd)
+            else:
+                personagem.inventario.adicionar_material(item, qtd)
+            detalhes = f"Trabalhou na oficina e {desc} (+{qtd} {item})"
+            ganho = item
         else:
-            personagem.inventario.adicionar_material(item, qtd)
+            detalhes = "Trabalhou na oficina mas não tem habilidade para produzir nada"
+            ganho = None
         
         resultado = ResultadoEncontro.ADEQUACAO
         delta = 0.2
@@ -966,8 +968,8 @@ class ProcessadorEncontros:
             resultado=resultado,
             delta_potencia=delta,
             sucesso=True,
-            ganho_recurso=item,
-            detalhes=f"Trabalhou na oficina e {desc} (+{qtd} {item})"
+            ganho_recurso=ganho,
+            detalhes=detalhes
         )
 
 
