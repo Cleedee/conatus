@@ -621,12 +621,14 @@ class Simulacao:
             # Verificar se é locomoção
             if encontro_escolhido.objeto.startswith("mover_"):
                 destino = encontro_escolhido.objeto.replace("mover_", "")
-                self._iniciar_movimento(personagem, destino)
-                resultado["movimentos"].append({
-                    "personagem": personagem.nome,
-                    "origem": personagem.local_atual,
-                    "destino": destino
-                })
+                if self._iniciar_movimento(personagem, destino):
+                    resultado["movimentos"].append({
+                        "personagem": personagem.nome,
+                        "origem": personagem.local_atual,
+                        "destino": destino
+                    })
+                else:
+                    personagem.estado = EstadoPersonagem.ATIVO
             
             # Verificar se é CRAFTING
             elif encontro_escolhido.objeto.startswith("craft_"):
@@ -822,9 +824,21 @@ class Simulacao:
         # Fallback: qualquer um
         return random.choice(encontros) if encontros else None
     
-    def _iniciar_movimento(self, personagem: Personagem, destino_id: str):
-        """Inicia movimento de personagem para destino"""
+    def _iniciar_movimento(self, personagem: Personagem, destino_id: str) -> bool:
+        """Inicia movimento de personagem para destino. Retorna False se barrado."""
+        local_destino = self.mapa.get_local(destino_id)
         local_origem = self.mapa.get_local(personagem.local_atual)
+        
+        # Verificar requer_ferramentas do destino
+        if local_destino and local_destino.requer_ferramentas:
+            tem_picareta = personagem.tem_item("picareta")
+            tem_machado = personagem.tem_item("machado")
+            if not (tem_picareta or tem_machado):
+                self.estado.registrar_evento(
+                    f"{personagem.nome} não consegue entrar em {local_destino.nome}: precisa de picareta ou machado",
+                    {"personagem": personagem.id, "destino": destino_id}
+                )
+                return False
         
         if local_origem and destino_id in local_origem.conexoes:
             tempo = local_origem.conexoes[destino_id]
@@ -835,6 +849,8 @@ class Simulacao:
             
             # Atualizar ocupação
             local_origem.ocupacao_atual = max(0, local_origem.ocupacao_atual - 1)
+            return True
+        return False
     
     def _processar_movimento(self, personagem: Personagem):
         """Processa movimento em andamento"""
