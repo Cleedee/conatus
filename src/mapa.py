@@ -522,7 +522,7 @@ def criar_mapa_padrao() -> Mapa:
         perigo=0.3,
         conforto=0.4,
         recursos=[
-            RecursoLocal("água_fresca", 0.95, 0.04),
+            RecursoLocal("água", 0.95, 0.04),
             RecursoLocal("peixe", 0.6, 0.015),
             RecursoLocal("pedras_lisas", 0.5, 0.003)
         ],
