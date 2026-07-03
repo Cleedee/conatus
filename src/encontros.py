@@ -713,6 +713,7 @@ class ProcessadorEncontros:
         self.efeitos: dict[str, Callable] = {
             "comida_comun": self._efeito_comida,
             "poço": self._efeito_agua,
+            "agua_fresca": self._efeito_agua,
             "madeira": self._efeito_madeira,
             "caça": self._efeito_caca,
             "peixe": self._efeito_peixe,
