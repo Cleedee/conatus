@@ -541,7 +541,7 @@ class Simulacao:
             ))
         
         # Adicionar opções de DEPÓSITO (se personagem tem itens para depositar)
-        depositaveis = ["comida", "madeira", "colheita", "pedra"]
+        depositaveis = ["comida", "madeira", "colheita", "pedra", "ferramentas"]
         for dep_rec_nome in depositaveis:
             # Verificar se local aceita esse recurso
             if local:
@@ -1047,15 +1047,16 @@ class Simulacao:
             "madeira": "madeira",
             "pedra": "pedra",
             "cogumelos": "comida",
+            "ferramentas": "ferramentas",
         }
         
         if rec_nome not in depositaveis:
             return {"status": "erro", "descricao": f"{rec_nome} não pode ser depositado", "detalhes": ""}
         
         # Encontrar material correspondente no inventário
-        mat_alvo = rec_nome  # nome do material no inventário
+        ferramentas_nomeadas = {"machado", "picareta", "vara_pesca", "fogueira"}
+        mat_alvo = rec_nome
         if rec_nome == "comida":
-            # Priorizar comida fresca para depósito (estraga logo)
             mat_alvo = "comida"
             if not personagem.inventario.tem_material(mat_alvo, 1):
                 mat_alvo = "carne_assada"
@@ -1068,12 +1069,28 @@ class Simulacao:
             if not personagem.inventario.tem_material(mat_alvo, 1):
                 mat_alvo = "carne_defumada"
         
-        if not personagem.inventario.tem_material(mat_alvo, 1):
+        if rec_nome == "ferramentas":
+            qtd_depositada = 0
+            # Tentar depositar item "ferramentas" genérico
+            if personagem.tem_item("ferramentas"):
+                qtd_depositada = min(3, personagem.inventario.get_quantidade_itens("ferramentas"))
+                personagem.remover_item("ferramentas", qtd_depositada)
+                mat_alvo = "ferramentas"
+            # Se não tem, tentar depositar ferramenta nomeada
+            if qtd_depositada == 0:
+                for ferr_nome in ferramentas_nomeadas:
+                    if personagem.tem_item(ferr_nome):
+                        qtd_depositada = 1
+                        personagem.remover_item(ferr_nome)
+                        mat_alvo = ferr_nome
+                        break
+            if qtd_depositada == 0:
+                return {"status": "erro", "descricao": "Não tem ferramentas para depositar", "detalhes": ""}
+        elif not personagem.inventario.tem_material(mat_alvo, 1):
             return {"status": "erro", "descricao": f"Não tem {mat_alvo} para depositar", "detalhes": ""}
-        
-        # Remover do inventário e adicionar ao local
-        qtd_depositada = min(3, personagem.inventario.get_quantidade(mat_alvo))
-        personagem.inventario.remover_material(mat_alvo, qtd_depositada)
+        else:
+            qtd_depositada = min(3, personagem.inventario.get_quantidade(mat_alvo))
+            personagem.inventario.remover_material(mat_alvo, qtd_depositada)
         
         # Recurso local ganha 0.1 por unidade depositada
         ganho_local = qtd_depositada * 0.1
