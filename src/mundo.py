@@ -1421,8 +1421,8 @@ class Simulacao:
             if resultado["sucesso"]:
                 self.estado.registrar_evento(
                     f"{proponente.nome} trocou com {receptor.nome}: " +
-                    f"{[f'{qtd} {nome}' for nome, qtd in proposta.ofertando]} por " +
-                    f"{[f'{qtd} {nome}' for nome, qtd in proposta.pedindo]}",
+                    f"{[f'{item.quantidade} {item.nome}' for item in proposta.ofertando]} por " +
+                    f"{[f'{item.quantidade} {item.nome}' for item in proposta.pedindo]}",
                     {
                         "tipo": "troca",
                         "proponente": proponente.id,
@@ -1441,7 +1441,10 @@ class Simulacao:
             linhas.append(f"👥 {len(self.personagens)} personagens:")
             for p in self.personagens:
                 estado = "💤" if p.dormindo else "🚶" if p.estado == EstadoPersonagem.LOCOMOVENDO else "🧑"
-                linhas.append(f"   {estado} {p.nome} em {p.local_atual} (potência: {p.potencia_atual:.0%})")
+                # Habilidades a partir de Capaz (>= 0.4)
+                skills = [nome for nome, hab in p.habilidades.items() if hab.nivel >= 0.4]
+                sufixo_skills = f" [{', '.join(skills)}]" if skills else ""
+                linhas.append(f"   {estado} {p.nome} em {p.local_atual} (potência: {p.potencia_atual:.0%}){sufixo_skills}")
         
         # Eventos
         if self.estado.eventos_ativos:
@@ -1496,12 +1499,13 @@ class Simulacao:
     # CONTROLES
     # =========================================================================
     
-    def rodar(self, ticks: int = None):
+    def rodar(self, ticks: int = None, pausa_a_cada: int = 10):
         """
         Roda a simulação
         
         Args:
             ticks: Número de ticks para rodar (None = infinito)
+            pausa_a_cada: Pausar a cada N ticks (None = sem pausas)
         """
         print("\n🚀 INICIANDO SIMULAÇÃO")
         print("=" * 60)
@@ -1517,8 +1521,8 @@ class Simulacao:
                 self.tick()
                 tick_count += 1
                 
-                # Pausa a cada 10 ticks
-                if tick_count % 10 == 0:
+                # Pausa periódica
+                if pausa_a_cada and tick_count % pausa_a_cada == 0:
                     input("\n[Enter para continuar...]")
         
         except KeyboardInterrupt:
@@ -1651,7 +1655,9 @@ class Simulacao:
                     print(f"\n   👥 Aqui estão:")
                     for p in aqui:
                         estado = "💤" if p.dormindo else "🚶" if p.estado == EstadoPersonagem.LOCOMOVENDO else "🧑"
-                        print(f"      {estado} {p.nome} ({p.personalidade.arquetipo}) — potência: {p.potencia_atual:.0%}")
+                        skills = [nome for nome, hab in p.habilidades.items() if hab.nivel >= 0.4]
+                        sufixo = f" [{', '.join(skills)}]" if skills else ""
+                        print(f"      {estado} {p.nome} ({p.personalidade.arquetipo}) — potência: {p.potencia_atual:.0%}{sufixo}")
             
             def do_quem(self, arg):
                 """quem [local] — lista personagens. Se local for dado, filtra por local."""
@@ -1668,7 +1674,9 @@ class Simulacao:
                     print(f"\n   👥 Em {local.nome}:")
                     for p in personagens:
                         estado = "💤" if p.dormindo else "🚶" if p.estado == EstadoPersonagem.LOCOMOVENDO else "🧑"
-                        print(f"      {estado} {p.nome} ({p.personalidade.arquetipo}) — {self._formatar_necessidades(p)}")
+                        skills = [nome for nome, hab in p.habilidades.items() if hab.nivel >= 0.4]
+                        sufixo = f" [{', '.join(skills)}]" if skills else ""
+                        print(f"      {estado} {p.nome} ({p.personalidade.arquetipo}) — {self._formatar_necessidades(p)}{sufixo}")
                 else:
                     print(f"\n   👥 Personagens ({len(self.sim.personagens)}):")
                     # Agrupar por local
@@ -1683,7 +1691,9 @@ class Simulacao:
                         print(f"\n      📍 {nome_local}:")
                         for p in ps:
                             estado = "💤" if p.dormindo else "🚶" if p.estado == EstadoPersonagem.LOCOMOVENDO else "🧑"
-                            print(f"         {estado} {p.nome} ({p.personalidade.arquetipo}) — potência: {p.potencia_atual:.0%}")
+                            skills = [nome for nome, hab in p.habilidades.items() if hab.nivel >= 0.4]
+                            sufixo = f" [{', '.join(skills)}]" if skills else ""
+                            print(f"         {estado} {p.nome} ({p.personalidade.arquetipo}) — potência: {p.potencia_atual:.0%}{sufixo}")
             
             def do_personagem(self, arg):
                 """personagem <nome> — ficha completa do personagem"""
@@ -2048,4 +2058,4 @@ if __name__ == "__main__":
                     pass
         sim.rodar_interativo(ticks_iniciais=ticks)
     else:
-        sim.rodar(ticks=20)
+        sim.rodar(pausa_a_cada=2)
