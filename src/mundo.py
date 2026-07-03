@@ -1434,7 +1434,9 @@ class Simulacao:
         """Gera resumo textual do tick"""
         linhas = []
         
-        linhas.append(f"⏰ Tick {self.estado.tick_atual} | Dia {self.estado.dia} | {self.estado.nome_periodo} ({self.estado.hora}:00)")
+        emoji_estacao = {"primavera": "🌸", "verao": "☀️", "outono": "🍂", "inverno": "❄️"}
+        ico = emoji_estacao.get(self.estado.estacao_atual.value, "")
+        linhas.append(f"⏰ Tick {self.estado.tick_atual} | Dia {self.estado.dia} | {self.estado.nome_periodo} ({self.estado.hora}:00) {ico} {self.estado.estacao_atual.value}")
         
         # Personagens
         if self.personagens:
