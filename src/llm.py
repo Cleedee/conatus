@@ -350,7 +350,10 @@ Estado atual:
 - Fome: {personagem.necessidades.fome:.0%}
 - Sede: {personagem.necessidades.sede:.0%}
 - Energia: {personagem.necessidades.energia:.0%}
+- Saúde: {personagem.necessidades.saude:.0%}
 - Personalidade: {personagem.personalidade.arquetipo}
+
+Local: {contexto.get("local", "?")} | {contexto.get("outros", "sozinho")}
 
 Opções:
 {encontros_texto}
@@ -370,13 +373,21 @@ Responda APENAS com o NÚMERO da opção escolhida:"""
         # Buscar relação
         relacao = personagem.get_ou_criar_relacao(interlocutor.id)
         
+        # Habilidades conhecidas sobre o interlocutor
+        skills_info = personagem.skills_conhecidas_de(interlocutor.id)
+        skills_str = f"\n- Habilidades observadas: {skills_info}" if skills_info else ""
+        
+        # Itens visíveis do interlocutor
+        itens_v = interlocutor.itens_visiveis
+        itens_str = f"\n- Itens visíveis: {', '.join(itens_v)}" if itens_v else ""
+        
         prompt = f"""Você é {personagem.personalidade.nome}.
 
 INTERLOCUTOR: {interlocutor.nome}
 Sua relação com {interlocutor.nome}:
 - Afeto: {relacao.afeto:.2f} (-1 a 1)
 - Confiança: {relacao.confianca:.2f} (0 a 1)
-- Encontros anteriores: {relacao.encontros_positivos} positivos, {relacao.encontros_negativos} negativos
+- Encontros anteriores: {relacao.encontros_positivos} positivos, {relacao.encontros_negativos} negativos{skills_str}{itens_str}
 
 SEU ESTADO:
 - Potência: {personagem.potencia_atual:.0%}

@@ -946,6 +946,32 @@ class Simulacao:
         if len(personagem.historico_crafting) > 20:
             personagem.historico_crafting.pop(0)
         
+        # Observadores: outros no mesmo local percebem a skill sendo usada
+        for outro in self.personagens:
+            if outro.id == personagem.id:
+                continue
+            if outro.local_atual != personagem.local_atual:
+                continue
+            if not outro.pode_interagir:
+                continue
+            # Encontro observacional
+            obs_encontro = EncontroDisponivel(
+                id=f"obs_craft_{outro.id}_{receita.id}",
+                origem=OrigemEncontro.OBSERVACIONAL,
+                tipo=TipoEncontro.OBSERVACIONAL,
+                objeto=f"craft_{receita.id}",
+                descricao=f"{personagem.nome} está {receita.nome.lower()}",
+                intensidade=0.15,
+                disponibilidade=DisponibilidadeEncontro.RARO,
+                tag="observacao_craft"
+            )
+            self.motor_encontros.processar_encontro_observacional(outro, obs_encontro)
+            # Registrar skill observada
+            if resultado.resultado.value == "sucesso":
+                outro.observar_skill(
+                    personagem.id, receita.habilidade_requerida, nivel_habilidade
+                )
+        
         return {
             "personagem": personagem.nome,
             "receita": receita.nome,
@@ -1018,17 +1044,27 @@ class Simulacao:
         }
     
     def _listar_outros_no_local(self, personagem: Personagem) -> str:
-        """Lista outros personagens no mesmo local"""
+        """Lista outros personagens no mesmo local com skills visíveis"""
         outros = [
-            p.nome for p in self.personagens
+            p for p in self.personagens
             if p.local_atual == personagem.local_atual and p.id != personagem.id
         ]
         if not outros:
-            return "Ninguém mais"
-        elif len(outros) == 1:
-            return outros[0]
-        else:
-            return ", ".join(outros[:-1]) + " e " + outros[-1]
+            return "sozinho"
+        partes = []
+        for p in outros:
+            skills_v = personagem.skills_conhecidas_de(p.id)
+            itens_v = p.itens_visiveis
+            extra = []
+            if skills_v:
+                extra.append(skills_v)
+            if itens_v:
+                extra.append(", ".join(itens_v))
+            suf = f" ({'; '.join(extra)})" if extra else ""
+            partes.append(f"{p.nome}{suf}")
+        if len(partes) == 1:
+            return partes[0]
+        return ", ".join(partes[:-1]) + " e " + partes[-1]
     
     def _resolver_interacoes(self):
         """Resolve interações entre personagens no mesmo local"""

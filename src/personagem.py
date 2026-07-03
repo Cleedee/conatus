@@ -310,6 +310,9 @@ class Personagem:
         # Ferramentas equipadas (itens craftados que estão em uso)
         self.ferramentas_equipadas: list[str] = []
         
+        # Habilidades observadas em outros personagens: {person_id: {skill_name: level}}
+        self.skills_conhecidas: dict[str, dict[str, float]] = {}
+        
         # Histórico de crafting
         self.historico_crafting: list[dict] = []
         
@@ -468,7 +471,37 @@ class Personagem:
         return (self.inventario.tem_material(nome, quantidade) or 
                 self.inventario.get_quantidade_itens(nome) >= quantidade)
     
-    def usar_item(self, nome: str) -> str:
+    def observar_skill(self, personagem_id: str, skill: str, nivel: float):
+        """
+        Registra observação de uma skill sendo usada por outro personagem.
+        Acumula: exposições repetidas sobem o nível observado.
+        """
+        if personagem_id not in self.skills_conhecidas:
+            self.skills_conhecidas[personagem_id] = {}
+        atual = self.skills_conhecidas[personagem_id].get(skill, 0.0)
+        # Sobe gradualmente até o nível real, mas nunca ultrapassa
+        self.skills_conhecidas[personagem_id][skill] = min(nivel, atual + 0.05)
+    
+    @property
+    def itens_visiveis(self) -> list[str]:
+        """Itens que outros personagens podem ver (ferramentas + itens notáveis)"""
+        items = list(self.ferramentas_equipadas)
+        # Itens notáveis no inventário
+        notaveis = {"bandagem", "po_cura", "remedio", "machado", "picareta",
+                     "vara_pesca", "fogueira", "carne_defumada", "refeicao"}
+        if hasattr(self, 'inventario'):
+            for nome in notaveis:
+                if self.tem_item(nome) and nome not in items:
+                    items.append(nome)
+        return items
+    
+    def skills_conhecidas_de(self, outro_id: str) -> str:
+        """Retorna descrição textual das skills conhecidas de outro personagem"""
+        skills = self.skills_conhecidas.get(outro_id, {})
+        if not skills:
+            return ""
+        partes = sorted(skills.items(), key=lambda x: -x[1])
+        return ", ".join(f"{nome} ({nivel:.0%})" for nome, nivel in partes)
         """Usa um item consumível (medicina) — retorna descrição do efeito"""
         EFEITOS_MEDICINA = {
             "bandagem": {"saude": 0.15, "descricao": "Aplicou bandagem no ferimento"},
