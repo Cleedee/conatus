@@ -40,7 +40,7 @@ class ConfigLLM:
     
     # Ollama
     ollama_url: str = "http://localhost:11434"
-    modelo: str = "qwen2.5:0.5b"
+    modelo: str = "qwen2.5:1.5b"
     
     # llama.cpp
     llamacpp_url: str = "http://localhost:8080"
@@ -336,31 +336,43 @@ class GeradorPrompts:
         contexto: dict
     ) -> str:
         """
-        Gera prompt objetivo para decisão do personagem.
-        Formato direto (sem roleplay) para evitar recusa do LLM pequeno.
+        Gera prompt de decisão rico para o personagem escolher uma ação.
         """
+        # Detalhar cada opção com tipo e tag
         encontros_texto = "\n".join([
-            f"{i+1}. {e.descricao}"
+            f"{i+1}. {e.descricao} ({e.tipo.value}, {getattr(e, 'tag', '')})"
             for i, e in enumerate(encontros)
         ])
-        
-        prompt = f"""Dada a situação, qual a MELHOR escolha para {personagem.personalidade.nome}?
 
-Estado atual:
-- Fome: {personagem.necessidades.fome:.0%}
-- Sede: {personagem.necessidades.sede:.0%}
-- Energia: {personagem.necessidades.energia:.0%}
-- Saúde: {personagem.necessidades.saude:.0%}
-- Personalidade: {personagem.personalidade.arquetipo}
+        motiv_str = ", ".join(
+            f"{k}: {v:.0%}"
+            for k, v in personagem.personalidade.motivacoes.items()
+        )
 
-Local: {contexto.get("local", "?")} | {contexto.get("outros", "sozinho")}
+        prompt = f"""Você é {personagem.personalidade.nome}, uma pessoa com {personagem.personalidade.arquetipo}.
 
-Opções:
+ESTADO ATUAL:
+- Fome: {personagem.necessidades.fome:.0%} | Sede: {personagem.necessidades.sede:.0%}
+- Energia: {personagem.necessidades.energia:.0%} | Saúde: {personagem.necessidades.saude:.0%}
+- Potência: {personagem.potencia_atual:.0%} | Alegria: {personagem.afetos.alegria:.2f}
+
+PERSONALIDADE:
+- Arquétipo: {personagem.personalidade.arquetipo}
+- Descrição: {personagem.personalidade.descricao}
+- Valores: {', '.join(personagem.personalidade.valores)}
+- Medos: {', '.join(personagem.personalidade.medos)}
+- Motivações: {motiv_str}
+
+LOCAL: {contexto.get("local", "?")} às {contexto.get("hora", "?")}h
+{contexto.get("outros", "Sozinho")}
+
+OPÇÕES DISPONÍVEIS:
 {encontros_texto}
 
-Responda APENAS com o NÚMERO da opção escolhida:"""
+Pensamento: qual opção melhor atende suas necessidades urgentes e sua personalidade?
+Responda APENAS com o NÚMERO da opção escolhida (1 a {len(encontros)}):"""
         return prompt
-    
+
     @staticmethod
     def prompt_resposta_social(
         personagem,
@@ -370,38 +382,40 @@ Responda APENAS com o NÚMERO da opção escolhida:"""
         """
         Gera prompt para resposta social (diálogo)
         """
-        # Buscar relação
         relacao = personagem.get_ou_criar_relacao(interlocutor.id)
-        
-        # Habilidades conhecidas sobre o interlocutor
-        skills_info = personagem.skills_conhecidas_de(interlocutor.id)
-        skills_str = f"\n- Habilidades observadas: {skills_info}" if skills_info else ""
-        
-        # Itens visíveis do interlocutor
-        itens_v = interlocutor.itens_visiveis
-        itens_str = f"\n- Itens visíveis: {', '.join(itens_v)}" if itens_v else ""
-        
-        prompt = f"""Você é {personagem.personalidade.nome}.
 
-INTERLOCUTOR: {interlocutor.nome}
-Sua relação com {interlocutor.nome}:
-- Afeto: {relacao.afeto:.2f} (-1 a 1)
-- Confiança: {relacao.confianca:.2f} (0 a 1)
-- Encontros anteriores: {relacao.encontros_positivos} positivos, {relacao.encontros_negativos} negativos{skills_str}{itens_str}
+        skills_info = personagem.skills_conhecidas_de(interlocutor.id)
+        skills_str = f"\n  Habilidades observadas: {skills_info}" if skills_info else ""
+
+        itens_v = interlocutor.itens_visiveis
+        itens_str = f"\n  Itens visíveis: {', '.join(itens_v)}" if itens_v else ""
+
+        motiv_str = ", ".join(
+            f"{k}: {v:.0%}"
+            for k, v in personagem.personalidade.motivacoes.items()
+        )
+
+        prompt = f"""Você é {personagem.personalidade.nome}, {personagem.personalidade.descricao.lower()}
+
+INTERLOCUTOR: {interlocutor.nome} ({interlocutor.personalidade.arquetipo})
+RELAÇÃO COM {interlocutor.nome}:
+- Afeto: {relacao.afeto:.2f} (-1 a 1) | Confiança: {relacao.confianca:.2f} (0 a 1)
+- {relacao.encontros_positivos} encontros positivos, {relacao.encontros_negativos} negativos{skills_str}{itens_str}
 
 SEU ESTADO:
-- Potência: {personagem.potencia_atual:.0%}
-- Alegria: {personagem.afetos.alegria:.2f}
-- Temor: {personagem.afetos.temor:.2f}
+- Potência: {personagem.potencia_atual:.0%} | Alegria: {personagem.afetos.alegria:.2f} | Temor: {personagem.afetos.temor:.2f}
+- Fome: {personagem.necessidades.fome:.0%} | Sede: {personagem.necessidades.sede:.0%}
 
-CONTEXTO:
+SUA PERSONALIDADE:
+- Valores: {', '.join(personagem.personalidade.valores)}
+- Medos: {', '.join(personagem.personalidade.medos)}
+- Motivações: {motiv_str}
+- {personagem.personalidade.descricao}
+
+CONTEXTO DA INTERAÇÃO:
 {contexto}
 
-PERSONALIDADE:
-{personagem.personalidade.descricao}
-Valores: {', '.join(personagem.personalidade.valores)}
-
-Como você responde? Seja fiel à sua personalidade e relação com a pessoa.
+Como você, {personagem.personalidade.nome}, responde? Seja autêntica à sua personalidade, ao que precisa agora e à sua relação com {interlocutor.nome}.
 
 Responda APENAS em JSON:
 {{
@@ -411,7 +425,7 @@ Responda APENAS em JSON:
 }}
 """
         return prompt
-    
+
     @staticmethod
     def prompt_observacao(
         personagem,
@@ -420,7 +434,12 @@ Responda APENAS em JSON:
         """
         Gera prompt para observação de cena
         """
-        prompt = f"""Você é {personagem.personalidade.nome}.
+        motiv_str = ", ".join(
+            f"{k}: {v:.0%}"
+            for k, v in personagem.personalidade.motivacoes.items()
+        )
+
+        prompt = f"""Você é {personagem.personalidade.nome}, {personagem.personalidade.descricao.lower()}.
 
 VOCÊ OBSERVA:
 {cena}
@@ -428,9 +447,11 @@ VOCÊ OBSERVA:
 SEU ESTADO:
 - Potência: {personagem.potencia_atual:.0%}
 - Razão: {personagem.razao_vs_paixao:.0%}
+- Alegria: {personagem.afetos.alegria:.2f}
 - Medos: {', '.join(personagem.personalidade.medos)}
+- Motivações: {motiv_str}
 
-Como você interpreta o que vê? O que pensa? Algo muda em sua opinião?
+Como {personagem.personalidade.nome}, o que você pensa sobre o que vê? Essa cena muda algo na sua visão de mundo?
 
 Responda APENAS em JSON:
 {{
