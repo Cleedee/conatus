@@ -544,6 +544,35 @@ class Simulacao:
                     tag="producao"
                 ))
         
+        # Adicionar opção de DORMIR se estiver cansado ou com medo
+        if personagem.necessidades.energia < 0.5 or personagem.afetos.temor > 0.5:
+            motivos = []
+            if personagem.necessidades.energia < 0.2:
+                motivos.append("energia quase zerada")
+            elif personagem.necessidades.energia < 0.3:
+                motivos.append("energia criticamente baixa")
+            elif personagem.necessidades.energia < 0.5:
+                motivos.append("cansaço moderado")
+            if personagem.afetos.temor > 0.7:
+                motivos.append("muito temor")
+            elif personagem.afetos.temor > 0.5:
+                motivos.append("certo temor")
+
+            descricao = "Dormir para recuperar energias"
+            if motivos:
+                descricao += f" ({', '.join(motivos)})"
+
+            encontros.append(EncontroDisponivel(
+                id=f"dormir_{personagem.id}",
+                origem=OrigemEncontro.AMBIENTAL,
+                tipo=TipoEncontro.COGNITIVO,
+                objeto="dormir",
+                descricao=descricao,
+                intensidade=0.4,
+                disponibilidade=DisponibilidadeEncontro.SITUACIONAL,
+                tag="sono"
+            ))
+
         # Garantir que sempre haja encontros
         if not encontros:
             encontros.append(EncontroDisponivel(
@@ -746,8 +775,8 @@ class Simulacao:
                     )
                     break
         
-        # Verificar se deve dormir
-        if personagem.decidir_dormir():
+        # Verificar se deve dormir (apenas p/ personagens nÃ£o-LLM; LLM decide dormir como opÃ§Ã£o de encontro)
+        if not personagem.controlado_por_llm and personagem.decidir_dormir():
             personagem.dormindo = True
             personagem.estado = EstadoPersonagem.DORMINDO
             self.estado.registrar_evento(
@@ -836,6 +865,15 @@ class Simulacao:
                     "detalhes": resultado_dep["detalhes"],
                     "objeto": encontro_escolhido.objeto
                 })
+
+            # Verificar se Ã© DORMIR
+            elif encontro_escolhido.tag == "sono":
+                personagem.dormindo = True
+                personagem.estado = EstadoPersonagem.DORMINDO
+                self.estado.registrar_evento(
+                    f"{personagem.nome} foi dormir",
+                    {"personagem": personagem.id}
+                )
             
             else:
                 # Processar encontro normal
