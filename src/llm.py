@@ -449,7 +449,7 @@ class ParseRespostas:
             resultado["escolha"] = int(match_num.group(1))
         else:
             # Procurar qualquer número isolado
-            match_num2 = re.search(r'\b(\d)\b', resposta)
+            match_num2 = re.search(r'\b(\d+)\b', resposta)
             if match_num2:
                 resultado["escolha"] = int(match_num2.group(1))
         

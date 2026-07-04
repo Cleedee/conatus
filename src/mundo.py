@@ -294,7 +294,8 @@ class Simulacao:
         personagens: list[Personagem] = None,
         callback_display: Callable = None,
         usar_llm: bool = True,
-        config_llm: ConfigLLM = None
+        config_llm: ConfigLLM = None,
+        verbose: int = 0,
     ):
         # Componentes
         self.mapa = mapa or criar_mapa_padrao()
@@ -316,6 +317,9 @@ class Simulacao:
         self._llm_fila: dict[int, tuple[str, "concurrent.futures.Future"]] = {}
         self._prox_personagem_idx = 0
         
+        # Verbosity
+        self.verbose = verbose
+
         # Estado
         self.estado = EstadoMundo()
         
@@ -685,6 +689,10 @@ class Simulacao:
 
         print(f"   🧠 LLM consultado para {personagem.nome} (tick {self.estado.tick_atual})")
         decisao = self.agente_llm.decidir_acao(personagem, encontros, contexto)
+        if self.verbose >= 1:
+            print("   📋 Alternativas apresentadas:")
+            for i, e in enumerate(encontros, start=1):
+                print(f"      {i}. {e.descricao} ({e.tipo.value}, {e.tag})")
         decisao["_personagem_id"] = personagem.id
         return decisao
 
@@ -1611,7 +1619,7 @@ class Simulacao:
         """Delega para interface.mostrar_estatisticas_finais"""
         mostrar_estatisticas_finais(self)
 
-def criar_simulacao_padrao(usar_llm: bool = True, config_llm: ConfigLLM = None) -> Simulacao:
+def criar_simulacao_padrao(usar_llm: bool = True, config_llm: ConfigLLM = None, verbose: int = 0) -> Simulacao:
     """Cria simulação com personagens padrão"""
     mapa = criar_mapa_padrao()
     
@@ -1695,7 +1703,7 @@ def criar_simulacao_padrao(usar_llm: bool = True, config_llm: ConfigLLM = None) 
     )
     personagens.append(Personagem(lucia, local_inicial="vila"))
     
-    return Simulacao(mapa=mapa, personagens=personagens, usar_llm=usar_llm, config_llm=config_llm)
+    return Simulacao(mapa=mapa, personagens=personagens, usar_llm=usar_llm, config_llm=config_llm, verbose=verbose)
 
 
 # =============================================================================
@@ -1718,6 +1726,8 @@ if __name__ == "__main__":
                         help="URL do servidor LLM (padrão: http://localhost:11434)")
     parser.add_argument("--alternar", type=int, default=0,
                         help="Alternar LLM entre personagens a cada N ticks (padrão: 0 = desligado)")
+    parser.add_argument("-v", "--verbose", action="count", default=0,
+                        help="Aumenta verbosidade (-v mostra alternativas do LLM)")
     
     args = parser.parse_args()
     
@@ -1735,7 +1745,7 @@ if __name__ == "__main__":
             llamacpp_url=args.url or "http://localhost:8080",
         )
     
-    sim = criar_simulacao_padrao(usar_llm=usar_llm, config_llm=config_llm)
+    sim = criar_simulacao_padrao(usar_llm=usar_llm, config_llm=config_llm, verbose=args.verbose)
     
     # Configurar alternância de personagem LLM
     if args.llm and args.alternar > 0:
