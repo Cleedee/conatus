@@ -410,7 +410,8 @@ class Simulacao:
             if pid:
                 decisoes_llm[pid] = decisao_llm
                 razao = decisao_llm.get('razao','')
-                print(f"   ✅ Decisão LLM para {pid}: \"{razao}\"")
+                escolha = decisao_llm.get('escolha','?')
+                print(f"   ✅ {pid} → opção {escolha}: \"{razao[:100]}\"")
         
         # 4. PROCESSAR CADA PERSONAGEM
         for personagem in self.personagens:
@@ -576,9 +577,10 @@ class Simulacao:
         # ========= MODIFICAÇÕES NOTURNAS (luminosidade, frio) =========
         e_noite = not (6 <= self.estado.hora <= 20)
         if e_noite:
-            # 1. Reduzir intensidade de encontros diurnos (luminosidade)
+            # 1. Reduzir intensidade de encontros externos (luminosidade)
+            # Aplica a TODAS as tags, exceto as que são especificamente noturnas (dormir, abrigar-se)
             for e in encontros:
-                if e.tag in ("locomocao", "recurso", "producao", "crafting", "esperar"):
+                if e.tag not in ("sono", "abrigo"):
                     e.intensidade *= 0.5  # escuro atrapalha
                     e.descricao += " (prejudicado pela escuridão)"
 
@@ -658,12 +660,16 @@ class Simulacao:
                         f"LLM→{pid} (tick {tick_origem}): {razao[:60]}",
                         {"decisao": decisao}
                     )
-                    print(f"   ✅ Decisão LLM para {pid}: \"{razao}\"")
+                    escolha = decisao.get('escolha','?')
+                    emocao = decisao.get('emocao','')
+                    print(f"   ✅ {pid} → opção {escolha}: \"{razao[:100]}\"")
+                    if self.verbose >= 1 and emocao:
+                        print(f"   😶 Emoção: {emocao}")
                 except Exception as e:
                     self.estado.registrar_evento(
                         f"LLM falhou para {pid}: {e}", {}
                     )
-                    print(f"   ⚠ Decisão LLM falhou para {pid}: {e}")
+                    print(f"   ⚠ LLM falhou para {pid}: {e}")
                 ticks_prontos.append(tick_origem)
         
         # Limpar futuros concluídos
@@ -713,6 +719,10 @@ class Simulacao:
                     except BaseException as e:
                         fut.set_exception(e)
                 
+                if self.verbose >= 1:
+                    print(f"   📋 Alternativas para {p.nome}:")
+                    for i, e in enumerate(encontros, start=1):
+                        print(f"      {i}. {e.descricao} ({e.tipo.value}, {e.tag})")
                 t = threading.Thread(
                     target=rodar,
                     args=(futuro, self.agente_llm, p, encontros, contexto),
@@ -772,11 +782,21 @@ class Simulacao:
         }
 
         print(f"   🧠 LLM consultado para {personagem.nome} (tick {self.estado.tick_atual})")
-        decisao = self.agente_llm.decidir_acao(personagem, encontros, contexto)
         if self.verbose >= 1:
             print("   📋 Alternativas apresentadas:")
             for i, e in enumerate(encontros, start=1):
                 print(f"      {i}. {e.descricao} ({e.tipo.value}, {e.tag})")
+        decisao = self.agente_llm.decidir_acao(personagem, encontros, contexto)
+        if self.verbose >= 1:
+            escolha = decisao.get('escolha', '?')
+            razao = decisao.get('razao', '')
+            emocao = decisao.get('emocao', '')
+            print(f"   💭 LLM raciocinou: {razao[:150]}")
+            if emocao:
+                print(f"   😶 Emoção: {emocao}")
+            if isinstance(escolha, int) and 1 <= escolha <= len(encontros):
+                escolhido = encontros[escolha - 1]
+                print(f"   👉 Escolheu opção {escolha}: {escolhido.descricao[:100]}")
         decisao["_personagem_id"] = personagem.id
         return decisao
 

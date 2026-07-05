@@ -51,7 +51,7 @@ class ConfigLLM:
     
     # Parâmetros de geração
     temperature: float = 0.7
-    max_tokens: int = 30
+    max_tokens: int = 120
     top_p: float = 0.9
     
     # Timeout (segundos)
@@ -286,35 +286,94 @@ class MockLLM(LLMInterface):
     """LLM mock para testes sem modelo real"""
     
     def inferir(self, prompt: str) -> str:
-        """Retorna resposta simulada"""
-        import random
-        
-        # Análise simples do prompt para gerar resposta contextual
-        if "comida" in prompt.lower() or "fome" in prompt.lower():
-            acao = 1  # primeira opção geralmente é comida
-            razao = "Estou com fome, preciso comer"
-        elif "água" in prompt.lower() or "sede" in prompt.lower():
-            acao = 1
-            razao = "Preciso de água"
-        elif "dormir" in prompt.lower() or "sono" in prompt.lower():
-            acao = "evitar"
-            razao = "Estou cansado, vou descansar"
-        elif "social" in prompt.lower() or "conversa" in prompt.lower():
-            acao = 1
-            razao = "Vou interagir com os outros"
-        elif "perigo" in prompt.lower():
-            acao = "evitar"
-            razao = "Isso parece perigoso, vou evitar"
-        else:
-            acoes_num = [1, 2, 3, "evitar"]
-            acao = random.choice(acoes_num)
-            razao = "Escolhi esta opção baseado na situação"
-        
-        return json.dumps({
-            "escolha": acao,
-            "razao": razao,
-            "emocao": random.choice(["alegria", "neutro", "temor", "esperança"])
-        })
+        """Retorna resposta simulada — tenta simular decisão contextual"""
+        import re
+
+        # Extrair o número de opções do prompt
+        opcoes = re.findall(r'^(\d+)\.\s+(.*)', prompt, re.MULTILINE)
+        n_opcoes = len(opcoes)
+
+        def _encontrar_opcao(palavras_chave):
+            """Retorna o índice (1-based) da primeira opção que contém alguma palavra-chave"""
+            for num, desc in opcoes:
+                desc_lower = desc.lower()
+                if any(p.lower() in desc_lower for p in palavras_chave):
+                    return int(num)
+            return None
+
+        # 1. Se está vulnerável e há opção de sono/abrigo, priorizar descanso
+        if "vulnerável" in prompt.lower() or "AVISO" in prompt:
+            idx_sono = _encontrar_opcao(["Dormir", "sono"])
+            if idx_sono:
+                return json.dumps({
+                    "escolha": idx_sono,
+                    "razao": "Estou vulnerável, preciso descansar e me recuperar",
+                    "emocao": "temor"
+                })
+            idx_abrigo = _encontrar_opcao(["abrigo", "abrigar"])
+            if idx_abrigo:
+                return json.dumps({
+                    "escolha": idx_abrigo,
+                    "razao": "Preciso de um abrigo para me proteger",
+                    "emocao": "temor"
+                })
+
+        # 2. Necessidades básicas
+        if "fome" in prompt.lower() or "comida" in prompt.lower():
+            idx = _encontrar_opcao(["comer", "comida", "caça", "caçar", "pescar", "colher"])
+            if idx:
+                return json.dumps({
+                    "escolha": idx,
+                    "razao": "Preciso de comida para sobreviver",
+                    "emocao": "desejo"
+                })
+
+        if "sede" in prompt.lower() or "água" in prompt.lower():
+            idx = _encontrar_opcao(["água", "beber", "poço"])
+            if idx:
+                return json.dumps({
+                    "escolha": idx,
+                    "razao": "Preciso de água",
+                    "emocao": "desejo"
+                })
+
+        # 3. Perigo: evitar
+        if "☠ PERIGO" in prompt or "perigosa" in prompt.lower():
+            # Procurar opção SEM perigo
+            for num, desc in opcoes:
+                if "☠ PERIGO" not in desc and "prejudicado" not in desc.lower():
+                    return json.dumps({
+                        "escolha": int(num),
+                        "razao": "Evito situações perigosas, especialmente agora",
+                        "emocao": "temor"
+                    })
+
+        # 4. Fallback: comportamento baseado em arquétipo
+        prompt_lower = prompt.lower()
+        if "ativo" in prompt_lower:
+            idx = _encontrar_opcao(["explorar", "locomocao", "aventura"])
+            if idx:
+                return json.dumps({"escolha": idx, "razao": "Quero explorar e agir", "emocao": "desejo"})
+        if "prudente" in prompt_lower:
+            idx = _encontrar_opcao(["recurso", "coletar", "craft", "construir"])
+            if idx:
+                return json.dumps({"escolha": idx, "razao": "Melhor garantir recursos", "emocao": "neutro"})
+        if "generoso" in prompt_lower:
+            idx = _encontrar_opcao(["social", "conversa", "falar", "ajudar"])
+            if idx:
+                return json.dumps({"escolha": idx, "razao": "Vou interagir com os outros", "emocao": "alegria"})
+
+        # Fallback final: aleatório entre opções válidas
+        if n_opcoes > 0:
+            import random
+            idx = random.choice(range(1, n_opcoes + 1))
+            return json.dumps({
+                "escolha": idx,
+                "razao": "Escolhi esta opção baseado na situação",
+                "emocao": random.choice(["neutro", "esperança"])
+            })
+
+        return json.dumps({"escolha": 1, "razao": "Vou agir", "emocao": "neutro"})
     
     def verificar_disponivel(self) -> bool:
         return True
@@ -338,9 +397,17 @@ class GeradorPrompts:
         """
         Gera prompt de decisão rico para o personagem escolher uma ação.
         """
-        # Detalhar cada opção com tipo e tag
+        # Determinar período do dia para contexto
+        hora = contexto.get("hora", 8)
+        e_noite = not (6 <= hora <= 20)
+        periodo = "NOITE" if e_noite else ("MANHÃ" if hora < 12 else "TARDE" if hora < 18 else "ENTARDECER")
+
+        # Indicador de perigo/benefício para cada opção
         encontros_texto = "\n".join([
-            f"{i+1}. {e.descricao} ({e.tipo.value}, {getattr(e, 'tag', '')})"
+            f"{i+1}. {e.descricao}"
+            + (" ☠ PERIGO" if e.resultado_sugerido and e.resultado_sugerido.value == "dissolucao" else "")
+            + (" ✅ BENÉFICO" if e.resultado_sugerido and e.resultado_sugerido.value == "adequacao" else "")
+            + f" ({e.tipo.value}, {getattr(e, 'tag', '')})"
             for i, e in enumerate(encontros)
         ])
 
@@ -349,7 +416,7 @@ class GeradorPrompts:
             for k, v in personagem.personalidade.motivacoes.items()
         )
 
-        prompt = f"""Você é {personagem.personalidade.nome}, uma pessoa com {personagem.personalidade.arquetipo}.
+        prompt = f"""Você é {personagem.personalidade.nome}, uma pessoa {personagem.personalidade.arquetipo}.
 
 ESTADO ATUAL:
 - Fome: {personagem.necessidades.fome:.0%} | Sede: {personagem.necessidades.sede:.0%}
@@ -363,14 +430,43 @@ PERSONALIDADE:
 - Medos: {', '.join(personagem.personalidade.medos)}
 - Motivações: {motiv_str}
 
-LOCAL: {contexto.get("local", "?")} às {contexto.get("hora", "?")}h
-{contexto.get("outros", "Sozinho")}
+"""
 
-OPÇÕES DISPONÍVEIS:
-{encontros_texto}
+        # Contexto de local/horário
+        prompt += f"📍 LOCAL: {contexto.get('local', '?')} — {periodo} ({hora}h)"
+        if e_noite:
+            prompt += " 🌙 Escuro, perigoso, difícil enxergar."
+        prompt += f"\n{contexto.get('outros', 'Sozinho')}\n"
 
-Pensamento: qual opção melhor atende suas necessidades urgentes e sua personalidade?
-Responda APENAS com o NÚMERO da opção escolhida (1 a {len(encontros)}):"""
+        # Aviso de vulnerabilidade
+        if personagem.potencia_relativa < 0.3:
+            prompt += f"\n⚠ AVISO: Sua potência está criticamente baixa ({personagem.potencia_atual:.0%}). Você está vulnerável. Evite riscos desnecessários. Priorize segurança, descanso ou abrigo.\n"
+
+        # Aviso de necessidades críticas
+        nec_criticas = []
+        if personagem.necessidades.fome < 0.3:
+            nec_criticas.append(f"fome extrema ({personagem.necessidades.fome:.0%})")
+        if personagem.necessidades.sede < 0.3:
+            nec_criticas.append(f"sede extrema ({personagem.necessidades.sede:.0%})")
+        if personagem.necessidades.energia < 0.2:
+            nec_criticas.append(f"exaustão ({personagem.necessidades.energia:.0%})")
+        if personagem.necessidades.abrigo < 0.2:
+            nec_criticas.append(f"sem abrigo ({personagem.necessidades.abrigo:.0%})")
+        if personagem.necessidades.saude < 0.3:
+            nec_criticas.append(f"saúde debilitada ({personagem.necessidades.saude:.0%})")
+        if nec_criticas:
+            prompt += f"\n⚠ URGENTE: {', '.join(nec_criticas)}. Atenda estas necessidades primeiro!\n"
+
+        prompt += f"\nOPÇÕES DISPONÍVEIS:\n{encontros_texto}\n"
+
+        prompt += f"""
+Analise a situação, avalie os riscos e benefícios de cada opção,
+considere suas necessidades urgentes e sua personalidade.
+
+Responda neste formato (substitua X pelo número escolhido):
+Raciocínio: [explique sua escolha]
+Número: X"""
+
         return prompt
 
     @staticmethod
@@ -443,18 +539,24 @@ class ParseRespostas:
         # Tentar extrair de texto livre
         resultado = {"escolha": 1, "razao": "", "emocao": "neutro"}
         
-        # Procurar números no início ou após "opção"/"escolha"
-        match_num = re.search(r'(?:opção|escolha|opcao)[:\s]*(\d+)', resposta, re.IGNORECASE)
+        # Extrair raciocínio/razão (novo formato: "Raciocínio: ...")
+        match_razao = re.search(r'(?:Raciocínio|Razão|Raciocinio|Razao)[:\s]*(.*?)(?:\n|$)', resposta, re.IGNORECASE | re.DOTALL)
+        if match_razao:
+            resultado["razao"] = match_razao.group(1).strip()[:200]
+        
+        # Procurar número após "Número:" (novo formato) ou "opção"/"escolha" (formato antigo)
+        match_num = re.search(r'(?:N[uúüÚÜ]mero|n[uúüÚÜ]mero|opção|escolha|opcao)[:\s]*(\d+)', resposta, re.IGNORECASE)
         if match_num:
             resultado["escolha"] = int(match_num.group(1))
         else:
-            # Procurar qualquer número isolado
+            # Procurar qualquer número isolado (fallback)
             match_num2 = re.search(r'\b(\d+)\b', resposta)
             if match_num2:
                 resultado["escolha"] = int(match_num2.group(1))
         
-        # Usar a resposta inteira como razão se não achou padrão
-        resultado["razao"] = resposta[:200].strip()
+        # Se não encontrou raciocínio, usar a resposta inteira como razão
+        if not resultado["razao"]:
+            resultado["razao"] = resposta[:200].strip()
         
         return resultado
     
