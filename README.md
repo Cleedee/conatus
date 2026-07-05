@@ -272,12 +272,22 @@ Ervas   → Misturar → Remédio
 
 | Arquétipo | Prioridade |
 |-----------|------------|
-| 🧠 **Filósofo** | Reflexão, aprendizado, conversas profundas |
-| 🏃 **Ativo** | Exploração, aventura, mover-se |
-| 🛡️ **Prudente** | Segurança, recursos, planejamento |
-| 💝 **Generoso** | Ajudar outros, interação social |
-| 👑 **Dominador** | Recursos valiosos, controle |
-| 😨 **Medo** | Evitar riscos, ficar em locais seguros |
+| 🧠 **Filósofo** | Reflexão, aprendizado, conversas profundas, ensino |
+| 🏃 **Ativo** | Exploração, aventura, mover-se, caçar |
+| 🛡️ **Prudente** | Segurança, recursos, planejamento, construção |
+| 💝 **Generoso** | Ajudar outros, interação social, curar |
+| 👑 **Dominador** | Recursos valiosos, controle, metalurgia |
+| 😨 **Medo** | Evitar riscos, furtividade, observação |
+
+### Razão como Curiosidade (Spinozista)
+
+Personagens com `razao_vs_paixao` alta:
+1. **Toleram mais privação** — limiar de fome/sede reduzido
+   (`0.40 − razao × 0.15`, mínimo 0.20)
+2. **Priorizam engenharia** — chance de pular necessidades básicas
+   e investir em crafting experimental ou ferramentas
+3. **Fazem pedidos sociais** — pedem ensino ou crafting a outros,
+   reconhecendo que a potência coletiva supera a individual
 
 ---
 
@@ -286,47 +296,68 @@ Ervas   → Misturar → Remédio
 Cada módulo tem um bloco `if __name__ == "__main__":` — rode direto:
 
 ```bash
-cd src
+# Testar módulos individuais
+python3 src/mapa.py          # Mapa, pathfinding, clima, estações
+python3 src/personagem.py    # Personagem e personalidades
+python3 src/encontros.py     # Motor de encontros
+python3 src/habilidades.py   # Crafting e habilidades
+python3 src/mercado.py       # Trocas e barganha
+python3 src/llm.py           # Conexão com LLM
 
-python3 mapa.py          # Testar mapa e pathfinding
-python3 personagem.py    # Testar personagem e personalidades
-python3 encontros.py     # Testar motor de encontros
-python3 habilidades.py   # Testar crafting e habilidades
-python3 mercado.py       # Testar trocas e barganha
-python3 llm.py           # Testar conexão com LLM
+# Testar simulação com elenco reduzido
+python3 src/mundo.py --elenco elenco/dupla.json
 ```
 
 ---
 
 ## 📊 Personalização
 
-### Criar personagens customizados
+### Criar personagens customizados (JSON)
 
-```python
-from personagem import Personagem, Personalidade
+Crie um arquivo em `personagens/`:
 
-pers = Personalidade(
-    nome="Helena",
-    arquetipo="filosofo",  # filosofo, ativo, prudente, generoso, dominador, medo
-    idade=28,
-    descricao="Pensadora inquieta que busca compreender o mundo",
-    razao_innata=0.8,
-    motivacoes={
-        "sobrevivencia": 0.3,
-        "conforto": 0.2,
-        "poder": 0.1,
-        "reputacao": 0.5,
-        "ajudar_outros": 0.6,
-        "curiosidade": 0.9
-    },
-    valores=["sabedoria", "verdade", "compaixao"],
-    medos=["ignorancia", "estagnacao"]
-)
+```json
+{
+  "nome": "Helena",
+  "arquetipo": "generoso",
+  "idade": 29,
+  "descricao": "Curandeira paciente",
+  "razao_innata": 0.65,
+  "local_inicial": "floresta",
+  "controlado_por_llm": false,
+  "motivacoes": {
+    "ajudar_outros": 0.9,
+    "conhecimento": 0.7,
+    "curiosidade": 0.7
+  },
+  "valores": ["compaixão", "sabedoria"],
+  "medos": ["doença", "sofrimento"]
+}
+```
 
-helena = Personagem(pers, local_inicial="vila")
+Depois crie um roster em `elenco/`:
+
+```json
+{
+  "nome": "Meu Elenco",
+  "personagens": [
+    "personagens/helena.json",
+    "personagens/joao.json"
+  ]
+}
+```
+
+```bash
+python3 src/mundo.py --elenco elenco/meu_elenco.json
 ```
 
 ### Configurar LLM externo
+
+```bash
+python3 src/mundo.py --llm --model qwen2.5:0.5b --url http://localhost:11434
+```
+
+Ou via Python:
 
 ```python
 from llm import ConfigLLM, ProviderLLM
@@ -355,12 +386,16 @@ Verificar se emergem naturalmente:
 4. ✅ Resposta à escassez de recursos
 5. ✅ Habilidades e crafting
 6. ✅ Ensino e aprendizado entre personagens
-7. ⬜ Formação de facções e alianças
-8. ⬜ Especialização de papéis
-9. ⬜ Conflito e resolução
-10. ⬜ Traição e perdão
-11. ⬜ Cultura emergente (nomes, rituais, histórias)
-12. ⬜ Evolução da racionalidade coletiva
+7. ✅ **Razão como curiosidade** — racionais priorizam engenharia
+8. ✅ **Pedidos sociais** — cooperam para aprender e craftar
+9. ✅ **Crafting experimental** — tentam mesmo sem nível mínimo
+10. ✅ **Elenco JSON** — personagens configuráveis externamente
+11. ⬜ Formação de facções e alianças
+12. ⬜ Especialização de papéis
+13. ⬜ Conflito e resolução
+14. ⬜ Traição e perdão
+15. ⬜ Cultura emergente (nomes, rituais, histórias)
+16. ⬜ Evolução da racionalidade coletiva
 
 ---
 
