@@ -1,0 +1,19 @@
+{
+  "nome": "Tiago",
+  "arquetipo": "dominador",
+  "idade": 42,
+  "descricao": "Ferrageiro habilidoso que acumula poder e recursos",
+  "razao_innata": 0.55,
+  "local_inicial": "vila",
+  "controlado_por_llm": false,
+  "motivacoes": {
+    "poder": 0.9,
+    "reputacao": 0.8,
+    "conquista": 0.7,
+    "sobrevivencia": 0.5,
+    "conforto": 0.6,
+    "curiosidade": 0.4
+  },
+  "valores": ["força", "determinação"],
+  "medos": ["fraqueza", "dependência"]
+}

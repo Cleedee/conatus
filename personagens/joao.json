@@ -1,0 +1,19 @@
+{
+  "nome": "João",
+  "arquetipo": "prudente",
+  "idade": 40,
+  "descricao": "Homem cauteloso que analisa antes de agir",
+  "razao_innata": 0.7,
+  "local_inicial": "vila",
+  "controlado_por_llm": false,
+  "motivacoes": {
+    "sobrevivencia": 0.9,
+    "seguranca": 0.8,
+    "reputacao": 0.5,
+    "conforto": 0.4,
+    "poder": 0.2,
+    "curiosidade": 0.3
+  },
+  "valores": ["cautela", "honestidade"],
+  "medos": ["imprevisto", "pobreza"]
+}

@@ -1,0 +1,17 @@
+{
+  "nome": "Elenco Completo",
+  "descricao": "Todos os 12 personagens disponíveis",
+  "personagens": [
+    "personagens/maria.json",
+    "personagens/joao.json",
+    "personagens/ana.json",
+    "personagens/pedro.json",
+    "personagens/lucia.json",
+    "personagens/tiago.json",
+    "personagens/helena.json",
+    "personagens/raul.json",
+    "personagens/clara.json",
+    "personagens/otavio.json",
+    "personagens/sonia.json"
+  ]
+}

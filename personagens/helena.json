@@ -1,0 +1,19 @@
+{
+  "nome": "Helena",
+  "arquetipo": "generoso",
+  "idade": 29,
+  "descricao": "Curandeira paciente que vive na floresta",
+  "razao_innata": 0.65,
+  "local_inicial": "floresta",
+  "controlado_por_llm": false,
+  "motivacoes": {
+    "ajudar_outros": 0.9,
+    "conhecimento": 0.7,
+    "sobrevivencia": 0.6,
+    "conforto": 0.3,
+    "curiosidade": 0.7,
+    "reputacao": 0.4
+  },
+  "valores": ["compaixão", "sabedoria"],
+  "medos": ["doença", "sofrimento"]
+}

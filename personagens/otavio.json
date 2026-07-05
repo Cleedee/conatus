@@ -1,0 +1,19 @@
+{
+  "nome": "Otávio",
+  "arquetipo": "filosofo",
+  "idade": 60,
+  "descricao": "Eremita que vive no pântano estudando fungos e ervas",
+  "razao_innata": 0.85,
+  "local_inicial": "pantano",
+  "controlado_por_llm": false,
+  "motivacoes": {
+    "conhecimento": 0.9,
+    "curiosidade": 0.9,
+    "verdade": 0.7,
+    "sobrevivencia": 0.5,
+    "conforto": 0.2,
+    "reputacao": 0.1
+  },
+  "valores": ["sabedoria", "humildade"],
+  "medos": ["destruição da natureza", "ignorância"]
+}

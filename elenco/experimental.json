@@ -1,0 +1,12 @@
+{
+  "nome": "Elenco Experimental",
+  "descricao": "Personagens com habilidades variadas para testar aprendizado",
+  "personagens": [
+    "personagens/tiago.json",
+    "personagens/helena.json",
+    "personagens/raul.json",
+    "personagens/clara.json",
+    "personagens/otavio.json",
+    "personagens/sonia.json"
+  ]
+}

@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, Callable
 import random
+import json
+import os
 from datetime import datetime
 from collections import defaultdict
 
@@ -2093,12 +2095,112 @@ class Simulacao:
         """Delega para interface.mostrar_estatisticas_finais"""
         mostrar_estatisticas_finais(self)
 
-def criar_simulacao_padrao(usar_llm: bool = True, config_llm: ConfigLLM = None, verbose: int = 0) -> Simulacao:
-    """Cria simulação com personagens padrão"""
+def carregar_elenco(caminho_elenco: str) -> list[Personagem]:
+    """
+    Carrega personagens de um arquivo JSON de elenco.
+    
+    O arquivo de elenco contém referências a arquivos JSON individuais
+    de personagens. Exemplo:
+    
+    {
+        "nome": "Meu Elenco",
+        "personagens": [
+            "personagens/maria.json",
+            "personagens/joao.json"
+        ]
+    }
+    
+    Cada arquivo de personagem segue o schema de Personalidade + metadados.
+    """
+    # Resolver caminho base (diretório do arquivo de elenco)
+    caminho_elenco = os.path.abspath(caminho_elenco)
+    if not os.path.exists(caminho_elenco):
+        raise FileNotFoundError(f"Arquivo de elenco não encontrado: {caminho_elenco}")
+    
+    with open(caminho_elenco, "r", encoding="utf-8") as f:
+        dados_elenco = json.load(f)
+    
+    refs = dados_elenco.get("personagens", [])
+    if not refs:
+        raise ValueError(f"Elenco '{caminho_elenco}' não contém personagens")
+    
+    base_dir = os.path.dirname(caminho_elenco)
+    
+    personagens = []
+    for ref in refs:
+        # Resolver caminho relativo ao diretório do elenco ou absoluto
+        caminho_personagem = ref
+        if not os.path.isabs(caminho_personagem):
+            # Tentar relativo ao diretório do elenco
+            caminho_personagem = os.path.join(base_dir, caminho_personagem)
+            if not os.path.exists(caminho_personagem):
+                # Tentar relativo ao workspace (raiz do projeto)
+                caminho_personagem = os.path.join(os.getcwd(), ref)
+        
+        if not os.path.exists(caminho_personagem):
+            print(f"⚠ Personagem não encontrado: {ref} — ignorando")
+            continue
+        
+        with open(caminho_personagem, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+        
+        # Construir Personalidade
+        personalidade = Personalidade(
+            nome=dados["nome"],
+            arquetipo=dados["arquetipo"],
+            idade=dados.get("idade", 30),
+            descricao=dados.get("descricao", ""),
+            razao_innata=dados.get("razao_innata", 0.5),
+            motivacoes=dados.get("motivacoes", {
+                "sobrevivencia": 0.8,
+                "conforto": 0.5,
+                "curiosidade": 0.4
+            }),
+            valores=dados.get("valores", ["honestidade"]),
+            medos=dados.get("medos", ["solidão"])
+        )
+        
+        local = dados.get("local_inicial", "vila")
+        potencia = dados.get("potencia_inicial", 0.7)
+        
+        p = Personagem(personalidade, local_inicial=local, potencia_inicial=potencia)
+        p.controlado_por_llm = dados.get("controlado_por_llm", False)
+        
+        personagens.append(p)
+    
+    return personagens
+
+
+def criar_simulacao_padrao(
+    usar_llm: bool = True,
+    config_llm: ConfigLLM = None,
+    verbose: int = 0,
+    elenco_path: Optional[str] = None
+) -> Simulacao:
+    """
+    Cria simulação.
+    
+    Args:
+        elenco_path: Caminho para arquivo JSON de elenco.
+                     Se None, usa o elenco padrão (hardcoded).
+    """
     mapa = criar_mapa_padrao()
     
-    # Criar personagens
+    # Carregar personagens
     personagens = []
+    if elenco_path:
+        personagens = carregar_elenco(elenco_path)
+    else:
+        personagens = _criar_personagens_padrao()
+    
+    return Simulacao(mapa=mapa, personagens=personagens, usar_llm=usar_llm, config_llm=config_llm, verbose=verbose)
+
+
+def _criar_personagens_padrao() -> list[Personagem]:
+    """Cria personagens padrão embutidos no código"""
+    personagens = []
+    
+    # Maria - Generosa
     
     # Maria - Generosa
     maria = Personalidade(
@@ -2177,7 +2279,7 @@ def criar_simulacao_padrao(usar_llm: bool = True, config_llm: ConfigLLM = None, 
     )
     personagens.append(Personagem(lucia, local_inicial="vila"))
     
-    return Simulacao(mapa=mapa, personagens=personagens, usar_llm=usar_llm, config_llm=config_llm, verbose=verbose)
+    return personagens
 
 
 # =============================================================================
@@ -2185,6 +2287,7 @@ def criar_simulacao_padrao(usar_llm: bool = True, config_llm: ConfigLLM = None, 
 # =============================================================================
 
 if __name__ == "__main__":
+    import sys
     import argparse
     
     parser = argparse.ArgumentParser(description="Mundo Aberto — Simulação Espinozista")
@@ -2202,8 +2305,26 @@ if __name__ == "__main__":
                         help="Alternar LLM entre personagens a cada N ticks (padrão: 0 = desligado)")
     parser.add_argument("-v", "--verbose", action="count", default=0,
                         help="Aumenta verbosidade (-v mostra alternativas do LLM)")
+    parser.add_argument("--elenco", type=str, default=None,
+                        help="Caminho para arquivo JSON de elenco (ex: elenco/experimental.json)")
+    parser.add_argument("--listar-personagens", action="store_true",
+                        help="Lista personagens disponíveis no elenco e sai")
     
     args = parser.parse_args()
+    
+    # Listar personagens de um elenco e sair
+    if args.listar_personagens:
+        caminho = args.elenco or "elenco/default.json"
+        if not os.path.exists(caminho):
+            print(f"Arquivo não encontrado: {caminho}")
+            sys.exit(1)
+        personagens = carregar_elenco(caminho)
+        print(f"\n📋 Elenco: {caminho}")
+        for p in personagens:
+            extra = " 🤖" if p.controlado_por_llm else ""
+            print(f"  - {p.nome:12s} ({p.personalidade.arquetipo:12s}) razão={p.razao_vs_paixao:.2f}{extra}  — {p.local_atual}")
+        print(f"\nTotal: {len(personagens)} personagens")
+        sys.exit(0)
     
     # Configurar LLM se solicitado
     config_llm = None
@@ -2219,7 +2340,12 @@ if __name__ == "__main__":
             llamacpp_url=args.url or "http://localhost:8080",
         )
     
-    sim = criar_simulacao_padrao(usar_llm=usar_llm, config_llm=config_llm, verbose=args.verbose)
+    sim = criar_simulacao_padrao(
+        usar_llm=usar_llm,
+        config_llm=config_llm,
+        verbose=args.verbose,
+        elenco_path=args.elenco
+    )
     
     # Configurar alternância de personagem LLM
     if args.llm and args.alternar > 0:

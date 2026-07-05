@@ -1,0 +1,11 @@
+{
+  "nome": "Elenco Padrão",
+  "descricao": "Personagens originais da simulação",
+  "personagens": [
+    "personagens/maria.json",
+    "personagens/joao.json",
+    "personagens/ana.json",
+    "personagens/pedro.json",
+    "personagens/lucia.json"
+  ]
+}

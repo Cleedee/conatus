@@ -1,0 +1,8 @@
+{
+  "nome": "Dupla",
+  "descricao": "Apenas dois personagens para teste rápido",
+  "personagens": [
+    "personagens/maria.json",
+    "personagens/tiago.json"
+  ]
+}

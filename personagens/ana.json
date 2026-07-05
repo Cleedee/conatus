@@ -1,0 +1,19 @@
+{
+  "nome": "Ana",
+  "arquetipo": "ativo",
+  "idade": 28,
+  "descricao": "Jovem energica que age por impulso",
+  "razao_innata": 0.4,
+  "local_inicial": "planicie",
+  "controlado_por_llm": false,
+  "motivacoes": {
+    "aventura": 0.8,
+    "conquista": 0.7,
+    "liberdade": 0.9,
+    "sobrevivencia": 0.5,
+    "conforto": 0.3,
+    "curiosidade": 0.6
+  },
+  "valores": ["coragem", "liberdade"],
+  "medos": ["tédio", "aprisionamento"]
+}

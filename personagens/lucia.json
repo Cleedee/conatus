@@ -1,0 +1,19 @@
+{
+  "nome": "Lúcia",
+  "arquetipo": "medo",
+  "idade": 32,
+  "descricao": "Mulher cautelosa movida pelo temor",
+  "razao_innata": 0.5,
+  "local_inicial": "vila",
+  "controlado_por_llm": false,
+  "motivacoes": {
+    "seguranca": 0.9,
+    "protecao": 0.8,
+    "estabilidade": 0.7,
+    "sobrevivencia": 0.6,
+    "conforto": 0.5,
+    "curiosidade": 0.2
+  },
+  "valores": ["cautela", "prudência"],
+  "medos": ["perigo", "escuro", "solidão"]
+}

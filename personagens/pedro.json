@@ -1,0 +1,19 @@
+{
+  "nome": "Pedro",
+  "arquetipo": "filosofo",
+  "idade": 55,
+  "descricao": "Velho sábio que busca compreender o mundo",
+  "razao_innata": 0.9,
+  "local_inicial": "montanha",
+  "controlado_por_llm": false,
+  "motivacoes": {
+    "conhecimento": 0.9,
+    "verdade": 0.8,
+    "ensinar": 0.6,
+    "sobrevivencia": 0.4,
+    "conforto": 0.3,
+    "curiosidade": 0.9
+  },
+  "valores": ["sabedoria", "honestidade"],
+  "medos": ["ignorância", "dogmatismo"]
+}

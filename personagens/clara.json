@@ -1,0 +1,19 @@
+{
+  "nome": "Clara",
+  "arquetipo": "ativo",
+  "idade": 24,
+  "descricao": "Aventureira destemida que explora ruínas antigas",
+  "razao_innata": 0.45,
+  "local_inicial": "ruinas",
+  "controlado_por_llm": false,
+  "motivacoes": {
+    "aventura": 0.9,
+    "liberdade": 0.8,
+    "curiosidade": 0.8,
+    "conquista": 0.6,
+    "sobrevivencia": 0.4,
+    "reputacao": 0.3
+  },
+  "valores": ["coragem", "curiosidade"],
+  "medos": ["tédio", "mesmice"]
+}

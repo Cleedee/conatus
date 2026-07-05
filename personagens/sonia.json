@@ -1,0 +1,19 @@
+{
+  "nome": "Sônia",
+  "arquetipo": "medo",
+  "idade": 37,
+  "descricao": "Sobrevivente solitária que desconfia de todos",
+  "razao_innata": 0.55,
+  "local_inicial": "caverna",
+  "controlado_por_llm": false,
+  "motivacoes": {
+    "seguranca": 0.9,
+    "sobrevivencia": 0.9,
+    "protecao": 0.8,
+    "conforto": 0.4,
+    "poder": 0.3,
+    "curiosidade": 0.2
+  },
+  "valores": ["autossuficiência", "desconfiança"],
+  "medos": ["pessoas", "traição", "fome"]
+}
