@@ -573,6 +573,61 @@ class Simulacao:
                 tag="sono"
             ))
 
+        # ========= MODIFICAÇÕES NOTURNAS (luminosidade, frio) =========
+        e_noite = not (6 <= self.estado.hora <= 20)
+        if e_noite:
+            # 1. Reduzir intensidade de encontros diurnos (luminosidade)
+            for e in encontros:
+                if e.tag in ("locomocao", "recurso", "producao", "crafting", "esperar"):
+                    e.intensidade *= 0.5  # escuro atrapalha
+                    e.descricao += " (prejudicado pela escuridão)"
+
+            # 2. Adicionar/priorizar opção de DORMIR
+            tem_sono = any(e.tag == "sono" for e in encontros)
+            if not tem_sono:
+                encontros.append(EncontroDisponivel(
+                    id=f"dormir_{personagem.id}",
+                    origem=OrigemEncontro.AMBIENTAL,
+                    tipo=TipoEncontro.COGNITIVO,
+                    objeto="dormir",
+                    descricao="Dormir para passar a noite",
+                    intensidade=0.6,
+                    disponibilidade=DisponibilidadeEncontro.SITUACIONAL,
+                    tag="sono"
+                ))
+
+            # 3. Adicionar opção de PROCURAR ABRIGO (se estiver em ermo sem proteção)
+            if local:
+                tem_abrigo = (local.id == personagem.moradia_local and personagem.tem_moradia) or \
+                             local.construcoes.get("abrigo", 0) > 0 or \
+                             local.construcoes.get("cabana", 0) > 0
+                if not tem_abrigo:
+                    # Local seguro mais próximo (vila)
+                    if "vila" in local.conexoes and local.id != "vila":
+                        encontros.append(EncontroDisponivel(
+                            id=f"abrigar_vila_{personagem.id}",
+                            origem=OrigemEncontro.AMBIENTAL,
+                            tipo=TipoEncontro.FISICO,
+                            objeto="mover_vila",
+                            descricao="Procurar abrigo na Vila para passar a noite",
+                            intensidade=0.7,
+                            disponibilidade=DisponibilidadeEncontro.SITUACIONAL,
+                            tag="abrigo"
+                        ))
+                    # Construir abrigo se tiver materiais
+                    tem_madeira = personagem.inventario.tem_material("madeira", 3)
+                    if tem_madeira:
+                        encontros.append(EncontroDisponivel(
+                            id=f"construir_abrigo_{personagem.id}",
+                            origem=OrigemEncontro.RECURSO,
+                            tipo=TipoEncontro.COGNITIVO,
+                            objeto="craft_abrigo",
+                            descricao="Construir um abrigo aqui com madeira",
+                            intensidade=0.5,
+                            disponibilidade=DisponibilidadeEncontro.SITUACIONAL,
+                            tag="crafting"
+                        ))
+
         # Garantir que sempre haja encontros
         if not encontros:
             encontros.append(EncontroDisponivel(
@@ -759,10 +814,17 @@ class Simulacao:
         local = self.mapa.get_local(personagem.local_atual)
         if local:
             personagem.aplicar_clima_local(local.clima_local.value)
+
+        # Aplicar efeitos noturnos (frio, mosquitos, escuridão)
+        personagem.aplicar_efeitos_noturnos(local, self.estado.hora)
         
         # Atualizar necessidades
         personagem.tick_necessidades()
         personagem.tick_afetos()
+
+        # Encontros noturnos automáticos (frio, mosquitos)
+        if not self.estado.e_dia:
+            self._processar_encontros_noturnos(personagem, local, resultado)
         
         # Auto-usar medicina se ferido e tiver itens
         if personagem.necessidades.saude < 0.5:
@@ -1076,6 +1138,51 @@ class Simulacao:
             local_origem.ocupacao_atual = max(0, local_origem.ocupacao_atual - 1)
             return True
         return False
+
+    def _processar_encontros_noturnos(
+        self,
+        personagem: Personagem,
+        local: Optional[Local],
+        resultado: dict
+    ):
+        """
+        Processa encontros negativos automáticos durante a noite (frio, mosquitos).
+        Só afeta personagens em ermos sem proteção.
+        """
+        if 6 <= self.estado.hora <= 20:
+            return
+
+        # Verificar se está protegido (na própria moradia ou local com abrigo)
+        protegido = False
+        if local:
+            if local.id == personagem.moradia_local and personagem.tem_moradia:
+                protegido = True
+            elif local.construcoes.get("abrigo", 0) > 0 or local.construcoes.get("cabana", 0) > 0:
+                protegido = True
+
+        if protegido:
+            return
+
+        # Registrar encontro no resultado (as penalidades de necessidades
+        # já foram aplicadas por aplicar_efeitos_noturnos em personagem.py)
+        detalhes_noturnos = []
+        if local:
+            detalhes_noturnos.append("frio cortante")
+        if local and local.id in {"floresta", "rio", "pantano", "lago", "praia", "planicie"}:
+            detalhes_noturnos.append("mosquitos")
+        if local and local.nivel_desenvolvimento == 0:
+            detalhes_noturnos.append("escuridão total")
+
+        if detalhes_noturnos:
+            desc = f"Noite em {local.nome if local else 'ermos'}: {', '.join(detalhes_noturnos)}"
+            resultado["encontros"].append({
+                "personagem": personagem.nome,
+                "tipo": "ambiental",
+                "resultado": "dissolucao",
+                "delta": -0.05,
+                "descricao": desc,
+                "detalhes": desc
+            })
     
     def _processar_movimento(self, personagem: Personagem):
         """Processa movimento em andamento"""
@@ -1567,6 +1674,24 @@ class Simulacao:
             for e in self.estado.eventos_ativos:
                 linhas.append(f"   - {e.nome}: {e.descricao} ({e.duracao - e.tick_atual} ticks restantes)")
         
+        # Relações entre personagens no mesmo local
+        relacoes_exibidas = []
+        for p in self.personagens:
+            if not p.relacoes:
+                continue
+            for rid, r in p.relacoes.items():
+                if r.tipo == "personagem" and abs(r.afeto) > 0.3:
+                    # Verificar se a outra pessoa está no mesmo local
+                    outro_id = rid.split(":", 1)[-1]
+                    outro = self.get_personagem(outro_id)
+                    if outro and outro.local_atual == p.local_atual:
+                        if abs(r.afeto) > 0.5:
+                            emo = "❤️" if r.afeto > 0 else "💔"
+                            relacoes_exibidas.append(f"   {emo} {p.nome} {r.sentimento} {r.entidade_nome} (afeto: {r.afeto:+.2f})")
+        if relacoes_exibidas:
+            linhas.append("🤝 Relações:")
+            linhas.extend(relacoes_exibidas[:5])
+        
         return "\n".join(linhas)
     
     # =========================================================================
@@ -1607,6 +1732,23 @@ class Simulacao:
             for c in resumo["crafting"]:
                 emoji = "✅" if c.get("sucesso") else "❌"
                 print(f"   {emoji} {c.get('personagem', '?')}: {c.get('mensagem', '')}")
+
+        # Relações entre personagens no mesmo local
+        relacoes_exibidas = []
+        for p in self.personagens:
+            if not p.relacoes:
+                continue
+            for rid, r in p.relacoes.items():
+                if r.tipo == "personagem" and abs(r.afeto) > 0.3:
+                    outro_id = rid.split(":", 1)[-1]
+                    outro = self.get_personagem(outro_id)
+                    if outro and outro.local_atual == p.local_atual:
+                        emo = "❤️" if r.afeto > 0 else "💔"
+                        relacoes_exibidas.append(f"   {emo} {p.nome} {r.sentimento} {r.entidade_nome} (afeto: {r.afeto:+.2f})")
+        if relacoes_exibidas:
+            print("\n🤝 Relações:")
+            for linha in relacoes_exibidas[:5]:
+                print(linha)
 
         print("=" * 60)
     

@@ -18,6 +18,7 @@ import json
 import random
 from datetime import datetime
 from habilidades import Habilidade, Inventario
+from mapa import Local
 
 
 # =============================================================================
@@ -883,6 +884,58 @@ Foque em: quem você conhece, o que aprendeu, o que causou alegria/tristeza.
                 f"Exposto a clima {clima}",
                 entidade_nome=clima
             )
+
+    def aplicar_efeitos_noturnos(self, local: Optional[Local], hora: int):
+        """
+        Aplica penalidades noturnas (frio, mosquitos, escuridão).
+        Chamado por mundo.py quando é noite.
+        Se o personagem tem abrigo no local (moradia ou construção), os efeitos são reduzidos.
+        """
+        if 6 <= hora <= 20:
+            return  # pleno dia, sem efeitos
+
+        # Verificar se está protegido (na própria moradia ou local com abrigo/cabana)
+        protegido = False
+        if local:
+            if local.id == self.moradia_local and self.tem_moradia:
+                protegido = True
+            elif local.construcoes.get("abrigo", 0) > 0 or local.construcoes.get("cabana", 0) > 0:
+                protegido = True
+
+        if protegido:
+            # Mesmo abrigado, a noite consome um pouco de energia
+            self.necessidades.energia -= 0.005
+            self.necessidades.normalizar()
+            return
+
+        # FRIO básico (todo ermo exposto à noite)
+        self.necessidades.abrigo -= 0.03
+        self.necessidades.energia -= 0.02
+
+        # MOSQUITOS e umidade (locais com água/mata/pântano)
+        locais_com_mosquitos = {"floresta", "rio", "pantano", "lago", "praia", "planicie", "ruinas"}
+        if local and local.id in locais_com_mosquitos:
+            self.necessidades.saude -= 0.01
+            self.necessidades.energia -= 0.01
+
+        # ERMO (nível 0) — exposição total, pior ainda
+        if local and local.nivel_desenvolvimento == 0:
+            self.necessidades.saude -= 0.01
+            self.necessidades.abrigo -= 0.01
+
+        self.necessidades.normalizar()
+
+        # Registrar memória do desconforto noturno
+        self.memoria_trabalho.append(MemoriaEncontro(
+            id=f"noite_{len(self.memoria_trabalho)}",
+            timestamp=0,
+            tipo=TipoEncontro.AMBIENTAL,
+            agente="noite",
+            descricao="Sofrendo com o frio e mosquitos da noite",
+            resultado=ResultadoEncontro.DISSOLUCAO,
+            delta_potencia=-0.03,
+            local=local.id if local else "desconhecido"
+        ))
 
     def tick_necessidades(self):
         """
