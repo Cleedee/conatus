@@ -5,7 +5,7 @@
   "descricao": "Construtor experiente que planeja cada movimento",
   "razao_innata": 0.75,
   "local_inicial": "vila",
-  "controlado_por_llm": false,
+  "controlado_por_llm": true,
   "motivacoes": {
     "seguranca": 0.9,
     "conforto": 0.8,

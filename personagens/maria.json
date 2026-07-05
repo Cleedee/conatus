@@ -5,7 +5,7 @@
   "descricao": "Mulher calorosa que acredita no poder da comunidade",
   "razao_innata": 0.6,
   "local_inicial": "vila",
-  "controlado_por_llm": true,
+  "controlado_por_llm": false,
   "motivacoes": {
     "sobrevivencia": 0.8,
     "ajudar_outros": 0.9,

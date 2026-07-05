@@ -1,0 +1,11 @@
+{
+  "nome": "Elenco Experimento 01",
+  "descricao": "Personagens misturados",
+  "personagens": [
+    "personagens/helena.json",
+    "personagens/joao.json",
+    "personagens/ana.json",
+    "personagens/raul.json",
+    "personagens/tiago.json"
+  ]
+}
