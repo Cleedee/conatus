@@ -1071,33 +1071,64 @@ class Simulacao:
         1. Se necessidades críticas, priorizar sobrevivência
         2. Caso contrário, agir conforme personalidade
         """
-        # FASE 1: Necessidades críticas sempre têm prioridade
-        if personagem.necessidades.fome < 0.4:
+        # FASE 1: Necessidades — moduladas pela RAZÃO (Espinosa)
+        # Personagens racionais compreendem que a verdadeira solução
+        # para a escassez está na engenharia, não na coleta imediata.
+        # Suportam mais privação em prol do investimento de longo prazo.
+        razao = personagem.razao_vs_paixao
+        
+        # O limiar de necessidade crítica diminui com a razão:
+        #   razão 0.0 → limiar 0.40 (reage à menor fome)
+        #   razão 0.5 → limiar 0.35
+        #   razão 1.0 → limiar 0.25 (só age quando fome é severa)
+        limiar_fome = max(0.20, 0.40 - razao * 0.15)
+        limiar_sede = max(0.20, 0.40 - razao * 0.15)
+        
+        # Antes de agir por necessidade, a razão avalia se há
+        # oportunidade de investimento que resolva a causa raiz
+        craftings = [e for e in encontros if e.tag == "crafting"]
+        experimental_crafts = [e for e in encontros if e.tag == "crafting_experimental"]
+        
+        # FASE 0: RAZÃO — visão de longo prazo
+        # O sábio espinozista intui que excedentes vêm da engenharia.
+        # Prioriza criar ferramentas que multiplicarão sua potência.
+        if razao > 0.5:
+            chance_engenharia = (razao - 0.5) * 0.5  # 0% a 25%
+            
+            # Se há algo NOVO para aprender (experimental), chance extra
+            if experimental_crafts and random.random() < chance_engenharia + 0.10:
+                return random.choice(experimental_crafts)
+            
+            # Se há crafts úteis (ferramentas, construção, processamento)
+            crafts_uteis = [e for e in craftings if any(
+                t in e.descricao.lower()
+                for t in ["machado", "picareta", "abrigo", "cabana", "cordas",
+                          "pranchas", "metal", "fogueira", "armazem"]
+            )]
+            if crafts_uteis and random.random() < chance_engenharia:
+                return random.choice(crafts_uteis)
+        
+        # Curiosidade (não-racional): desejo espinozista de aumentar
+        # potência por conhecimento — 15% mesmo com necessidades baixas
+        if experimental_crafts and random.random() < 0.15:
+            return random.choice(experimental_crafts)
+        
+        # FASE 1: Necessidades críticas (com limiar ajustado pela razão)
+        if personagem.necessidades.fome < limiar_fome:
             for e in encontros:
                 if "comida" in e.objeto or "comer" in e.descricao.lower():
                     return e
         
-        if personagem.necessidades.sede < 0.4:
+        if personagem.necessidades.sede < limiar_sede:
             for e in encontros:
                 if "água" in e.objeto or "poço" in e.objeto or "beber" in e.descricao.lower():
                     return e
         
         # FASE 2: Coleta e crafting quando há materiais
-        craftings = [e for e in encontros if e.tag == "crafting"]
         coletas = [e for e in encontros
                    if e.tag in ("recurso", "alimento", "sobrevivencia", "producao")
                    and e.origem != OrigemEncontro.SOCIAL
                    and "mover_" not in e.objeto]
-        
-        # Se tem receitas disponíveis, chance de craftar (aumentada)
-        experimental_crafts = [e for e in encontros if e.tag == "crafting_experimental"]
-        
-        # Curiosidade: mesmo com necessidades básicas, chance de tentar aprender
-        # (representa desejo espinozista de aumentar potência por conhecimento)
-        if experimental_crafts:
-            # 15% de chance de tentar algo novo mesmo com fome/sede
-            if random.random() < 0.15:
-                return random.choice(experimental_crafts)
         
         if craftings or experimental_crafts:
             # Preferir tentativas experimentais (aprender coisas novas)
@@ -1645,6 +1676,12 @@ class Simulacao:
                     # TROCA AUTOMÁTICA!
                     self._tentar_troca(p1, p2)
 
+                    # PEDIDO SOCIAL: personagens racionais pedem ajuda
+                    # Espinosa: agir por razão é cooperar para aumentar
+                    # a potência coletiva. Um sábio pede ajuda a outro.
+                    self._tentar_pedido(p1, p2)
+                    self._tentar_pedido(p2, p1)
+
                     if not dialogo:
                         self.estado.registrar_evento(
                             f"{p1.nome} e {p2.nome} interagiram",
@@ -1752,6 +1789,160 @@ class Simulacao:
                         "receptor": receptor.id
                     }
                 )
+    
+    def _tentar_pedido(self, p1: Personagem, p2: Personagem):
+        """
+        Pedido social: personagem racional pede a outro que realize
+        uma tarefa que ele mesmo não pode fazer.
+        
+        Espinosa: agir por razão é cooperar — reconhecer que a
+        potência coletiva supera a individual. Um sábio pede ajuda
+        a outro cuja habilidade complementa a sua.
+        """
+        # Identificar quem é o mais racional (quem pode fazer o pedido)
+        if p1.razao_vs_paixao < 0.5 and p2.razao_vs_paixao < 0.5:
+            return  # nenhum é racional o suficiente
+        
+        if p1.razao_vs_paixao >= p2.razao_vs_paixao:
+            requisitante, ajudante = p1, p2
+        else:
+            requisitante, ajudante = p2, p1
+        
+        # Um racional reconhece sua ignorância — pede ajuda quando
+        # o outro TEM uma skill que ele não tem (ou tem mais fraca)
+        # Isso é independente de necessidades imediatas.
+        from habilidades import MotorEnsino
+        motor_ensino = MotorEnsino()
+        
+        # Verificar se o ajudante pode ensinar algo útil
+        pode_ensinar = ajudante.habilidades_pode_ensinar()
+        pode_aprender = requisitante.habilidades_pode_aprender(ajudante)
+        
+        tem_skill_util = bool(pode_ensinar and pode_aprender)
+        
+        if not tem_skill_util:
+            # Talvez o ajudante possa CRAFTAR algo que o requisitante não pode
+            materiais_req = requisitante.inventario.get_materiais_dict()
+            if not materiais_req:
+                return
+            habilidades_ajud = {nome: hab.nivel for nome, hab in ajudante.habilidades.items()}
+            # Não precisa de skill se for receita com nivel_minimo=0.0
+            # Mas o requisitante quer algo que ELE não pode fazer
+            for r in self.motor_crafting.banco.receitas.values():
+                if not r.habilidade_requerida:
+                    continue
+                # Requisitante não tem a skill ou tem nível baixo
+                nivel_req = requisitante.get_nivel_habilidade(r.habilidade_requerida)
+                if nivel_req >= r.nivel_minimo:
+                    continue  # requisitante já pode fazer
+                # Ajudante tem a skill?
+                nivel_ajud = ajudante.get_nivel_habilidade(r.habilidade_requerida)
+                if nivel_ajud >= r.nivel_minimo:
+                    # Verificar materiais
+                    if all(materiais_req.get(mat, 0) >= qtd for mat, qtd in r.materiais.items()):
+                        tem_skill_util = True
+                        break
+        
+        if not tem_skill_util:
+            return  # não há o que pedir
+        
+        # O ajudante aceita? Baseado na relação
+        relacao = requisitante.get_ou_criar_relacao(ajudante.id, "personagem", ajudante.nome)
+        chance_aceitar = 0.5 + relacao.get_modificador() * 0.2
+        if ajudante.necessidades.media() < 0.3:
+            chance_aceitar *= 0.5  # ajudante em necessidade própria
+        
+        if random.random() > chance_aceitar:
+            return  # recusou
+        
+        # ========== PRIORIDADE 1: ENSINAR ==========
+        if pode_ensinar and pode_aprender:
+            # Escolher skill com maior gap (mais a aprender)
+            skill_escolhida = None
+            maior_gap = 0.0
+            for s in pode_ensinar:
+                if s in pode_aprender:
+                    nivel_req = requisitante.get_nivel_habilidade(s)
+                    gap = ajudante.habilidades[s].nivel - nivel_req
+                    if gap > maior_gap:
+                        maior_gap = gap
+                        skill_escolhida = s
+            
+            if skill_escolhida is not None:
+                nivel_prof = ajudante.habilidades[skill_escolhida].nivel
+                nivel_aluno_val = requisitante.get_nivel_habilidade(skill_escolhida)
+                
+                xp = motor_ensino.calcular_ganho_ensino(nivel_aluno_val, nivel_prof)
+                if xp > 0:
+                    subiu = requisitante.ganhar_xp(skill_escolhida, xp)
+                    ajudante.ganhar_xp(skill_escolhida, max(1, xp // 4))
+                    
+                    msg = f"🙏 {requisitante.nome} pediu que {ajudante.nome} ensinasse {skill_escolhida}"
+                    if subiu:
+                        msg += " (subiu de nível!)"
+                    
+                    self.estado.registrar_evento(msg, {
+                        "tipo": "pedido",
+                        "requisitante": requisitante.id,
+                        "ajudante": ajudante.id,
+                        "skill": skill_escolhida,
+                        "xp": xp
+                    })
+                    return
+        
+        # ========== PRIORIDADE 2: CRAFTAR ==========
+        materiais_req = requisitante.inventario.get_materiais_dict()
+        if not materiais_req:
+            return
+        
+        habilidades_ajud = {nome: hab.nivel for nome, hab in ajudante.habilidades.items()}
+        
+        # Encontrar receita que o ajudante pode fazer e o requisitante não
+        receita_escolhida = None
+        for r in self.motor_crafting.banco.receitas.values():
+            if not r.habilidade_requerida:
+                continue
+            nivel_req = requisitante.get_nivel_habilidade(r.habilidade_requerida)
+            if nivel_req >= r.nivel_minimo:
+                continue
+            nivel_ajud = ajudante.get_nivel_habilidade(r.habilidade_requerida)
+            if nivel_ajud < r.nivel_minimo:
+                continue
+            if not all(materiais_req.get(mat, 0) >= qtd for mat, qtd in r.materiais.items()):
+                continue
+            receita_escolhida = r
+            break
+        
+        if not receita_escolhida:
+            return
+        
+        # Ajudante crafta usando os materiais do requisitante
+        for mat, qtd in receita_escolhida.materiais.items():
+            requisitante.inventario.remover_material(mat, qtd)
+        
+        nivel_skill = ajudante.get_nivel_habilidade(receita_escolhida.habilidade_requerida)
+        resultado = self.motor_crafting.tentar_crafting(
+            receita_escolhida, materiais_req, nivel_skill
+        )
+        
+        if resultado.itens_criados:
+            for nome, qtd in resultado.itens_criados:
+                requisitante.inventario.adicionar_item(nome, qtd)
+            
+            ajudante.ganhar_xp(receita_escolhida.habilidade_requerida, resultado.xp_ganho)
+            requisitante.ganhar_xp(receita_escolhida.habilidade_requerida, max(1, resultado.xp_ganho // 3))
+            
+            self.estado.registrar_evento(
+                f"🙏 {requisitante.nome} pediu que {ajudante.nome} fizesse {receita_escolhida.nome} — "
+                f"{resultado.mensagem}",
+                {
+                    "tipo": "pedido_craft",
+                    "requisitante": requisitante.id,
+                    "ajudante": ajudante.id,
+                    "receita": receita_escolhida.nome,
+                    "sucesso": resultado.resultado.value
+                }
+            )
     
     def _gerar_resumo_tick(self) -> str:
         """Gera resumo textual do tick"""
