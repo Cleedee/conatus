@@ -1041,8 +1041,8 @@ AFETOS ATUAIS:
 
 NECESSIDADES:
 - Energia: {self.necessidades.energia:.2f}
-- Fome: {self.necessidades.fome:.2f}
-- Sede: {self.necessidades.sede:.2f}
+- Fome: {1.0 - self.necessidades.fome:.2f} (0.00 = sem fome, 1.00 = faminto)
+- Sede: {1.0 - self.necessidades.sede:.2f} (0.00 = sem sede, 1.00 = desidratado)
 - Abrigo: {self.necessidades.abrigo:.2f}
 - Saúde: {self.necessidades.saude:.2f}
 

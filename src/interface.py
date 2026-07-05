@@ -133,8 +133,8 @@ class REPLSimulacao(cmd.Cmd):
 
     def _formatar_necessidades(self, p: Personagem) -> str:
         n = p.necessidades
-        return (f"Energia={n.energia:.0%} Fome={n.fome:.0%} "
-                f"Sede={n.sede:.0%} Abrigo={n.abrigo:.0%} Saúde={n.saude:.0%}")
+        return (f"Energia={n.energia:.0%} Saciedade={n.fome:.0%} "
+                f"Hidratação={n.sede:.0%} Abrigo={n.abrigo:.0%} Saúde={n.saude:.0%}")
 
     def _formatar_afetos(self, p: Personagem) -> str:
         a = p.afetos
@@ -261,8 +261,8 @@ class REPLSimulacao(cmd.Cmd):
    │
    │ 📊 Necessidades:
    │    Energia: {p.necessidades.energia:.0%} {self._barra_vida(p.necessidades.energia)}
-   │    Fome:   {p.necessidades.fome:.0%} {self._barra_vida(p.necessidades.fome)}
-   │    Sede:   {p.necessidades.sede:.0%} {self._barra_vida(p.necessidades.sede)}
+   │    Saciedade: {p.necessidades.fome:.0%} {self._barra_vida(p.necessidades.fome)}
+   │    Hidratação: {p.necessidades.sede:.0%} {self._barra_vida(p.necessidades.sede)}
    │    Abrigo: {p.necessidades.abrigo:.0%} {self._barra_vida(p.necessidades.abrigo)}
    │    Saúde:  {p.necessidades.saude:.0%} {self._barra_vida(p.necessidades.saude)}
    │

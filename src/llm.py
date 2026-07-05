@@ -419,7 +419,7 @@ class GeradorPrompts:
         prompt = f"""Você é {personagem.personalidade.nome}, uma pessoa {personagem.personalidade.arquetipo}.
 
 ESTADO ATUAL:
-- Fome: {personagem.necessidades.fome:.0%} | Sede: {personagem.necessidades.sede:.0%}
+- Fome: {1.0 - personagem.necessidades.fome:.0%} | Sede: {1.0 - personagem.necessidades.sede:.0%}
 - Energia: {personagem.necessidades.energia:.0%} | Saúde: {personagem.necessidades.saude:.0%}
 - Potência: {personagem.potencia_atual:.0%} | Alegria: {personagem.afetos.alegria:.2f}
 
@@ -445,9 +445,9 @@ PERSONALIDADE:
         # Aviso de necessidades críticas
         nec_criticas = []
         if personagem.necessidades.fome < 0.3:
-            nec_criticas.append(f"fome extrema ({personagem.necessidades.fome:.0%})")
+            nec_criticas.append(f"fome extrema ({(1.0 - personagem.necessidades.fome):.0%})")
         if personagem.necessidades.sede < 0.3:
-            nec_criticas.append(f"sede extrema ({personagem.necessidades.sede:.0%})")
+            nec_criticas.append(f"sede extrema ({(1.0 - personagem.necessidades.sede):.0%})")
         if personagem.necessidades.energia < 0.2:
             nec_criticas.append(f"exaustão ({personagem.necessidades.energia:.0%})")
         if personagem.necessidades.abrigo < 0.2:
