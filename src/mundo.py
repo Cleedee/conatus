@@ -616,9 +616,9 @@ class Simulacao:
                             disponibilidade=DisponibilidadeEncontro.SITUACIONAL,
                             tag="abrigo"
                         ))
-                    # Construir abrigo se tiver materiais
-                    tem_madeira = personagem.inventario.tem_material("madeira", 3)
-                    if tem_madeira:
+                    # Construir abrigo se tiver materiais (ou mostrar quanto falta)
+                    qtd_madeira = personagem.inventario.get_quantidade("madeira")
+                    if qtd_madeira >= 3:
                         encontros.append(EncontroDisponivel(
                             id=f"construir_abrigo_{personagem.id}",
                             origem=OrigemEncontro.RECURSO,
@@ -628,6 +628,18 @@ class Simulacao:
                             intensidade=0.5,
                             disponibilidade=DisponibilidadeEncontro.SITUACIONAL,
                             tag="crafting"
+                        ))
+                    else:
+                        faltam = 3 - qtd_madeira
+                        encontros.append(EncontroDisponivel(
+                            id=f"precisa_abrigo_{personagem.id}",
+                            origem=OrigemEncontro.AMBIENTAL,
+                            tipo=TipoEncontro.COGNITIVO,
+                            objeto="precisa_abrigo",
+                            descricao=f"Falta{'m' if faltam > 1 else ''} {faltam} madeira{'s' if faltam > 1 else ''} para construir um abrigo improvisado",
+                            intensidade=0.05,
+                            disponibilidade=DisponibilidadeEncontro.SITUACIONAL,
+                            tag="planejamento"
                         ))
 
         # Garantir que sempre haja encontros
