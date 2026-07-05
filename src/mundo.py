@@ -492,11 +492,47 @@ class Simulacao:
         materiais_dict = personagem.inventario.get_materiais_dict()
         habilidades_dict = {nome: hab.nivel for nome, hab in personagem.habilidades.items()}
         
+        # Receitas com skill suficiente
         receitas_possiveis = self.motor_crafting.banco.listar_receitas_possiveis(
             materiais_dict, habilidades_dict
         )
         
-        for receita in receitas_possiveis[:3]:
+        ids_possiveis = set()
+        # Primeiro: TODAS as receitas que o personagem TEM skill (até 5)
+        for receita in receitas_possiveis[:5]:
+            if receita.tipo == TipoReceita.CONSTRUCAO:
+                motivo = (
+                    personagem.necessidades.abrigo < 0.5
+                    or personagem.moradia_local == personagem.local_atual
+                    or (local and bool(local.construcoes))
+                )
+                if not motivo:
+                    continue
+            
+            ids_possiveis.add(receita.id)
+            encontros.append(EncontroDisponivel(
+                id=f"craft_{receita.id}",
+                origem=OrigemEncontro.RECURSO,
+                tipo=TipoEncontro.COGNITIVO,
+                objeto=f"craft_{receita.id}",
+                descricao=f"🔧 {receita.nome} ({receita.tipo.value})",
+                intensidade=0.3,
+                disponibilidade=DisponibilidadeEncontro.SEMPRE,
+                tag="crafting"
+            ))
+        
+        # Segundo: Receitas EXPERIMENTAIS (materiais OK, skill INSUFICIENTE)
+        # SÃO as que estão em listar_receitas_por_materiais MAS NÃO em listar_receitas_possiveis
+        todas_por_materiais = self.motor_crafting.banco.listar_receitas_por_materiais(
+            materiais_dict
+        )
+        ids_possiveis_set = {r.id for r in receitas_possiveis}
+        experimentais_count = 0
+        for receita in todas_por_materiais:
+            if receita.id in ids_possiveis_set:
+                continue  # já sabe fazer
+            if experimentais_count >= 3:
+                break  # máximo 3 experimentais para não poluir
             if receita.tipo == TipoReceita.CONSTRUCAO:
                 motivo = (
                     personagem.necessidades.abrigo < 0.5
@@ -511,11 +547,12 @@ class Simulacao:
                 origem=OrigemEncontro.RECURSO,
                 tipo=TipoEncontro.COGNITIVO,
                 objeto=f"craft_{receita.id}",
-                descricao=f"🔧 {receita.nome} ({receita.tipo.value})",
-                intensidade=0.3,
+                descricao=f"🔧 {receita.nome} ⚠️ (tentativa — skill insuficiente)",
+                intensidade=0.15,  # menos atrativo
                 disponibilidade=DisponibilidadeEncontro.SEMPRE,
-                tag="crafting"
+                tag="crafting_experimental"
             ))
+            experimentais_count += 1
         
         # Adicionar opções de DEPÓSITO
         depositaveis = ["comida", "madeira", "colheita", "pedra", "ferramentas"]
@@ -870,11 +907,13 @@ class Simulacao:
                     break
         
         # Verificar se deve dormir (apenas p/ personagens nÃ£o-LLM; LLM decide dormir como opÃ§Ã£o de encontro)
-        if not personagem.controlado_por_llm and personagem.decidir_dormir():
+        # Forçar dormir se energia está criticamente baixa (qualquer personagem)
+        if personagem.necessidades.energia < 0.15 or personagem.decidir_dormir():
             personagem.dormindo = True
             personagem.estado = EstadoPersonagem.DORMINDO
             self.estado.registrar_evento(
-                f"{personagem.nome} foi dormir",
+                f"{personagem.nome} foi dormir" +
+                (" (exaustão)" if personagem.necessidades.energia < 0.15 else ""),
                 {"personagem": personagem.id}
             )
             return resultado
@@ -1050,9 +1089,22 @@ class Simulacao:
                    and e.origem != OrigemEncontro.SOCIAL
                    and "mover_" not in e.objeto]
         
-        # Se tem receitas disponíveis, chance de craftar
-        if craftings and random.random() < 0.35:
-            return random.choice(craftings)
+        # Se tem receitas disponíveis, chance de craftar (aumentada)
+        experimental_crafts = [e for e in encontros if e.tag == "crafting_experimental"]
+        
+        # Curiosidade: mesmo com necessidades básicas, chance de tentar aprender
+        # (representa desejo espinozista de aumentar potência por conhecimento)
+        if experimental_crafts:
+            # 15% de chance de tentar algo novo mesmo com fome/sede
+            if random.random() < 0.15:
+                return random.choice(experimental_crafts)
+        
+        if craftings or experimental_crafts:
+            # Preferir tentativas experimentais (aprender coisas novas)
+            if experimental_crafts and random.random() < 0.60:
+                return random.choice(experimental_crafts)
+            if craftings and random.random() < 0.50:
+                return random.choice(craftings)
         
         # Se não tem materiais no inventário, priorizar coleta
         tem_materiais = any(qtd > 0 for qtd in personagem.inventario.get_materiais_dict().values())
@@ -1252,8 +1304,8 @@ class Simulacao:
     
     def _processar_sono(self, personagem: Personagem):
         """Processa sono do personagem"""
-        # Recuperar necessidades
-        personagem.necessidades.energia += 0.08
+        # Recuperar necessidades (aumentado para 0.10)
+        personagem.necessidades.energia += 0.10
         personagem.necessidades.saude += 0.02  # sono recupera saúde
         
         # Abrigo recupera melhor na própria moradia
@@ -1265,8 +1317,8 @@ class Simulacao:
         
         personagem.necessidades.normalizar()
         
-        # Acordar quando energia alta
-        if personagem.necessidades.energia > 0.8:
+        # Acordar quando energia alta (mais cedo: 0.7)
+        if personagem.necessidades.energia > 0.7:
             personagem.dormindo = False
             personagem.estado = EstadoPersonagem.ATIVO
             self.estado.registrar_evento(
@@ -1290,13 +1342,18 @@ class Simulacao:
             receita, materiais_dict, habilidades_dict
         )
         
+        skill_insuficiente = False
         if not pode:
-            return {
-                "personagem": personagem.nome,
-                "receita": receita.nome,
-                "sucesso": False,
-                "motivo": motivo
-            }
+            # Se falhou só por skill, permitir tentativa experimental
+            if "Habilidade" in motivo or "habilidade" in motivo.lower():
+                skill_insuficiente = True
+            else:
+                return {
+                    "personagem": personagem.nome,
+                    "receita": receita.nome,
+                    "sucesso": False,
+                    "motivo": motivo
+                }
         
         # Remover materiais
         for mat, qtd in receita.materiais.items():
@@ -1304,9 +1361,20 @@ class Simulacao:
         
         # Tentar crafting
         nivel_habilidade = personagem.get_nivel_habilidade(receita.habilidade_requerida)
+        
+        # Se skill é insuficiente, usar nível efetivo penalizado
+        if skill_insuficiente:
+            nivel_efetivo = max(0.05, nivel_habilidade * 0.5)
+        else:
+            nivel_efetivo = nivel_habilidade
+        
         resultado = self.motor_crafting.tentar_crafting(
-            receita, materiais_dict, nivel_habilidade
+            receita, materiais_dict, nivel_efetivo
         )
+        
+        # Bônus de XP para tentativas experimentais (aprender fazendo)
+        if skill_insuficiente:
+            resultado.xp_ganho = int(resultado.xp_ganho * 1.5)
         
         # Aplicar resultado
         if resultado.itens_criados:
@@ -1315,7 +1383,7 @@ class Simulacao:
         
         # Ganhar XP
         if resultado.xp_ganho > 0:
-            personagem.ganhar_xp(receita.habilidade_requerida, resultado.xp_ganho)
+            subiu = personagem.ganhar_xp(receita.habilidade_requerida, resultado.xp_ganho)
         
         # Se for construção, registrar no local
         local = self.mapa.get_local(personagem.local_atual)
@@ -1377,6 +1445,9 @@ class Simulacao:
                 outro.observar_skill(
                     personagem.id, receita.habilidade_requerida, nivel_habilidade
                 )
+                # Observador ganha XP da observação (aprende vendo)
+                xp_obs = max(1, resultado.xp_ganho // 4)
+                outro.ganhar_xp(receita.habilidade_requerida, xp_obs)
         
         return {
             "personagem": personagem.nome,

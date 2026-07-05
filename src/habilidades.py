@@ -93,8 +93,8 @@ class Habilidade:
     
     @property
     def pode_ensinar(self) -> bool:
-        """Se pode ensinar outros"""
-        return self.nivel >= 0.4
+        """Se pode ensinar outros — reduzido para 0.2 para ensino mais cedo"""
+        return self.nivel >= 0.2
     
     @property
     def pode_aprender_com(self) -> bool:
@@ -114,7 +114,7 @@ class Habilidade:
         while self.experiencia >= self.xp_proximo_nivel:
             self.experiencia -= self.xp_proximo_nivel
             self.nivel = min(1.0, self.nivel + 0.05)
-            self.xp_proximo_nivel = int(self.xp_proximo_nivel * 1.5)
+            self.xp_proximo_nivel = int(self.xp_proximo_nivel * 1.3)
             subiu = True
         
         return subiu
@@ -588,13 +588,31 @@ class BancoReceitas:
         materiais: dict[str, int],
         habilidades: dict[str, float]
     ) -> list[Receita]:
-        """Lista receitas que o personagem pode fazer"""
+        """Lista receitas que o personagem pode fazer (skill OK)"""
         possiveis = []
         for receita in self.receitas.values():
             pode, _ = self.pode_craftar(receita, materiais, habilidades)
             if pode:
                 possiveis.append(receita)
         return possiveis
+    
+    def listar_receitas_por_materiais(
+        self,
+        materiais: dict[str, int],
+    ) -> list[Receita]:
+        """
+        Lista receitas onde os materiais estão disponíveis (ignora skill).
+        Usado para oferecer tentativas experimentais.
+        """
+        resultados = []
+        for receita in self.receitas.values():
+            materiais_ok = all(
+                materiais.get(mat, 0) >= qtd
+                for mat, qtd in receita.materiais.items()
+            )
+            if materiais_ok:
+                resultados.append(receita)
+        return resultados
 
 
 # =============================================================================
@@ -632,28 +650,28 @@ class MotorCrafting:
             # SUCESSO
             resultado = ResultadoCrafting.SUCESSO
             itens = [(receita.resultado_nome, receita.resultado_quantidade)]
-            xp = receita.xp_ganho
+            xp = receita.xp_ganho * 2  # XP dobrado para aprendizado mais rápido
             mensagem = f"✅ {receita.nome} concluído com sucesso!"
             
         elif resultado_rolagem < chance_sucesso + 0.2:
             # FALHA PARCIAL (perde metade dos materiais)
             resultado = ResultadoCrafting.FALHA_PARCIAL
             itens = []
-            xp = receita.xp_ganho // 2  # metade do XP
+            xp = receita.xp_ganho  # metade do XP base (base*2/2 = base)
             mensagem = f"⚠️ {receita.nome} falhou parcialmente. Alguns materiais foram perdidos."
             
         elif resultado_rolagem < chance_sucesso + 0.35:
             # FALHA TOTAL (perde tudo)
             resultado = ResultadoCrafting.FALHA_TOTAL
             itens = []
-            xp = receita.xp_ganho // 4
+            xp = receita.xp_ganho // 2
             mensagem = f"❌ {receita.nome} falhou completamente! Todos os materiais foram perdidos."
             
         else:
             # FALHA SEGURA (não perde nada)
             resultado = ResultadoCrafting.FALHA_SEGURA
             itens = []
-            xp = receita.xp_ganho // 10
+            xp = receita.xp_ganho // 5
             mensagem = f"🔄 Não conseguiu fazer {receita.nome}. Materiais preservados."
         
         # Calcular materiais perdidos
