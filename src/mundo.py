@@ -2356,6 +2356,6 @@ if __name__ == "__main__":
     if args.interativo is not None:
         sim.rodar_interativo(ticks_iniciais=args.interativo)
     elif args.llm:
-        sim.rodar()
+        sim.rodar(pausa_a_cada=100)
     else:
-        sim.rodar(ticks=50, pausa_a_cada=None)
+        sim.rodar(pausa_a_cada=100)
